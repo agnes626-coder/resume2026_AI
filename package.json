@@ -1,0 +1,33 @@
+{
+  "name": "react",
+  "version": "1.0.0",
+  "description": "",
+  "keywords": [],
+  "main": "src/index.tsx",
+  "dependencies": {
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-scripts": "5.0.1",
+    "@firebase/auth": "1.12.2",
+    "firebase": "12.11.0",
+    "github-from-package": "0.0.0",
+    "github-slugger": "2.0.0",
+    "docx": "^9.5.1",
+    "file-saver": "^2.0.5",
+    "jspdf": "^2.5.2",
+    "html2pdf.js": "^0.10.2"
+  },
+  "devDependencies": {
+    "@types/react": "19.0.0",
+    "@types/react-dom": "19.0.0",
+    "loader-utils": "3.2.1",
+    "typescript": "5.7.2"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test --env=jsdom",
+    "eject": "react-scripts eject"
+  },
+  "browserslist": [">0.2%", "not dead", "not ie <= 11", "not op_mini all"]
+}
