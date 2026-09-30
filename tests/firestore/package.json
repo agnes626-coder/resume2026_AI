@@ -1,0 +1,6 @@
+{
+  "name": "workbook-firestore-rules-tests",
+  "private": true,
+  "scripts": { "test": "firebase emulators:exec --only firestore --project demo-resume-workbook --config ../../firebase.json \"node --test rules.test.cjs\"" },
+  "devDependencies": { "@firebase/rules-unit-testing": "^5.0.0", "firebase": "12.11.0", "firebase-tools": "^15.0.0" }
+}

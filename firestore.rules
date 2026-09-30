@@ -1,0 +1,83 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function verifiedInstructorAccount() {
+      return request.auth != null
+        && request.auth.token.get('email_verified', false) == true
+        && request.auth.token.firebase.sign_in_provider in ['google.com', 'password'];
+    }
+    function email() { return request.auth.token.email.lower(); }
+    function owner() { return verifiedInstructorAccount() && email() == 'agnes626@hanyang.ac.kr'; }
+    function instructor() {
+      return verifiedInstructorAccount() && (owner()
+        || (exists(/databases/$(database)/documents/workbookInstructors/$(email()))
+          && get(/databases/$(database)/documents/workbookInstructors/$(email())).data.active == true));
+    }
+    function validCourse(courseId) {
+      let c = request.resource.data;
+      return courseId != 'general' && courseId.matches('^[a-zA-Z0-9_-]{1,128}$')
+        && c.keys().hasOnly(['name', 'active', 'codeSalt', 'createdAt', 'updatedAt'])
+        && c.name is string && c.name.size() > 0 && c.name.size() <= 120
+        && c.active is bool && c.codeSalt.matches('^[a-f0-9]{32}$')
+        && c.createdAt is timestamp && c.updatedAt == request.time
+        && getAfter(/databases/$(database)/documents/workbookCourseSecrets/$(courseId)).data.codeSalt == c.codeSalt;
+    }
+    match /workbookCourses/{courseId} {
+      allow read: if instructor() || resource.data.active == true;
+      allow create: if instructor() && validCourse(courseId) && request.resource.data.createdAt == request.time;
+      allow update: if instructor() && validCourse(courseId) && request.resource.data.createdAt == resource.data.createdAt;
+    }
+    match /workbookCourseSecrets/{courseId} {
+      allow read: if instructor();
+      allow create, update: if instructor()
+        && request.resource.data.keys().hasOnly(['codeSalt', 'codeHash', 'updatedAt'])
+        && request.resource.data.codeHash.matches('^[a-f0-9]{64}$')
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.codeSalt == getAfter(/databases/$(database)/documents/workbookCourses/$(courseId)).data.codeSalt;
+    }
+    function validEntry(p) {
+      return (p.courseId == 'general' && p.courseName == '일반참가용' && p.entryProof == '')
+        || (p.courseId != 'general'
+          && get(/databases/$(database)/documents/workbookCourses/$(p.courseId)).data.active == true
+          && p.courseName == get(/databases/$(database)/documents/workbookCourses/$(p.courseId)).data.name
+          && p.entryProof == get(/databases/$(database)/documents/workbookCourseSecrets/$(p.courseId)).data.codeHash);
+    }
+    function validParticipant(participantId) {
+      let p = request.resource.data;
+      return request.auth != null && p.uid == request.auth.uid
+        && p.keys().hasOnly(['uid', 'courseId', 'courseName', 'major', 'nickname', 'entryProof', 'joinedAt', 'updatedAt'])
+        && p.courseId.matches('^[a-zA-Z0-9_-]{1,128}$')
+        && participantId == p.courseId + '_' + request.auth.uid
+        && p.major is string && p.major.size() > 0 && p.major.size() <= 120
+        && p.nickname is string && p.nickname.size() > 0 && p.nickname.size() <= 80
+        && p.updatedAt == request.time && validEntry(p);
+    }
+    match /workbookParticipants/{participantId} {
+      allow get: if instructor() || (request.auth != null && participantId.matches('^[a-zA-Z0-9_-]{1,128}_' + request.auth.uid + '$'));
+      allow list: if instructor();
+      allow create: if validParticipant(participantId) && request.resource.data.joinedAt == request.time;
+      allow update: if validParticipant(participantId)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.courseId == resource.data.courseId
+        && request.resource.data.joinedAt == resource.data.joinedAt;
+    }
+    match /workbookInstructors/{instructorId} {
+      allow get: if owner() || (verifiedInstructorAccount() && instructorId == email());
+      allow list: if owner();
+      allow delete: if owner() && instructorId != 'agnes626@hanyang.ac.kr' && resource.data.active == false;
+      allow create, update: if owner() && instructorId != 'agnes626@hanyang.ac.kr'
+        && request.resource.data.keys().hasOnly(['email', 'active', 'updatedBy', 'updatedAt'])
+        && request.resource.data.email == instructorId
+        && instructorId == instructorId.lower() && instructorId.size() <= 254
+        && instructorId.matches('^[^\\s@/]+@[^\\s@/]+\\.[^\\s@/]+$')
+        && request.resource.data.active is bool
+        && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time;
+    }
+    // 기존 워크북 필드와 자신의 학생 프로필 저장은 유지합니다.
+    match /students/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.uid == uid;
+    }
+  }
+}

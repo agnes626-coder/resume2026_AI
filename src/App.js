@@ -1,31 +1,45 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  collection,
-  doc,
-  setDoc,
-  serverTimestamp,
-  addDoc,
-  getDocs,
-} from "firebase/firestore";
-import { db } from "./firebase";
+import "./firebase";
+import { CourseEntry } from "./CourseEntry";
 import { Document, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
-import { getAuth } from "firebase/auth";
 
 const STORAGE_KEY = "ai_self_intro_full_app_v1";
 const STUDENT_LIST_KEY = "ai_self_intro_student_list_v1";
 const VISITOR_COUNT_KEY = "ai_self_intro_visitor_count_v1";
 const VISITED_SESSION_KEY = "ai_self_intro_session_visited_v1";
-const ADMIN_ACCESS_CODE = "flypongpong01";
 
 const steps = [
   { key: "basic", label: "기본 정보", icon: "🎯" },
-  { key: "experience", label: "경험 선택", icon: "📌" },
+  { key: "experience", label: "면접관의 시선으로 경험 탐색", icon: "📌" },
   { key: "star", label: "STAR 정리", icon: "🧠" },
   { key: "competency", label: "역량 추출", icon: "✨" },
   { key: "draft", label: "초안 작성", icon: "✍️" },
   { key: "feedback", label: "AI 첨삭", icon: "🤖" },
   { key: "final", label: "최종본", icon: "🏁" },
+];
+
+const experienceCompetencies = [
+  {
+    title: "서비스 역량",
+    description: "상대의 필요와 불편을 이해하고, 더 나은 경험을 제공하는 역량입니다.",
+    question: "누군가의 필요를 알아차리고 도움을 주거나 불편을 개선한 적이 있나요?",
+  },
+  {
+    title: "문제해결능력",
+    description: "문제의 원인을 파악하고, 대안을 실행하며 결과를 점검하는 역량입니다.",
+    question: "예상치 못한 문제를 어떻게 파악했고, 어떤 방법을 시도했나요?",
+  },
+  {
+    title: "책임감·커리어 오너십",
+    description: "맡은 일을 끝까지 해내고, 자신의 성장과 진로를 주도적으로 만들어가는 역량입니다.",
+    question: "끝까지 책임진 일이나, 스스로 목표를 세워 배우고 도전한 경험이 있나요?",
+  },
+  {
+    title: "협업능력·컬처애드",
+    description: "다른 관점을 존중하며 함께 일하고, 자신의 강점으로 팀에 긍정적인 변화를 더하는 역량입니다.",
+    question: "의견 차이를 조율하거나 나만의 관점과 강점으로 팀에 기여한 적이 있나요?",
+  },
 ];
 
 const defaultData = {
@@ -47,6 +61,9 @@ const defaultData = {
   revisedDraft: "",
   finalDraft: "",
   reflection: "",
+  courseId: "",
+  courseName: "",
+  participationSynced: false,
 };
 
 const COLORS = {
@@ -87,11 +104,9 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState(0);
   const [data, setData] = useState(defaultData);
   const [visitorCount, setVisitorCount] = useState(0);
-  const [studentList, setStudentList] = useState([]);
+  const [, setStudentList] = useState([]);
   const [savedNotice, setSavedNotice] = useState(false);
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
-  const [showAdminModal, setShowAdminModal] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     try {
@@ -100,7 +115,7 @@ export default function App() {
         const parsed = JSON.parse(saved);
         const merged = { ...defaultData, ...parsed };
         setData(merged);
-        if (!merged.major || !merged.nickname) {
+        if (!merged.major || !merged.nickname || !merged.courseId) {
           setShowWelcomeModal(true);
         }
       } else {
@@ -155,8 +170,10 @@ export default function App() {
     setData((prev) => ({ ...prev, [key]: value }));
   };
 
-  const registerStudentLocal = (major, nickname) => {
+  const registerStudentLocal = (major, nickname, courseId, courseName) => {
     const nextStudent = {
+      courseId,
+      courseName,
       major,
       nickname,
       joinedAt: new Date().toLocaleString("ko-KR"),
@@ -164,7 +181,7 @@ export default function App() {
 
     setStudentList((prev) => {
       const filtered = prev.filter(
-        (item) => !(item.major === major && item.nickname === nickname)
+        (item) => !(item.major === major && item.nickname === nickname && item.courseId === courseId)
       );
       const nextList = [nextStudent, ...filtered];
       localStorage.setItem(STUDENT_LIST_KEY, JSON.stringify(nextList));
@@ -172,70 +189,15 @@ export default function App() {
     });
   };
 
-  const submitWelcomeInfo = async () => {
-    const trimmedMajor = data.major.trim();
-    const trimmedNickname = data.nickname.trim();
-
-    if (!trimmedMajor || !trimmedNickname) {
-      alert("전공과 닉네임을 입력해주세요.");
-      return;
-    }
-
-    // 로그인 사용자 확인
-    const auth = getAuth();
-    const user = auth.currentUser;
-
-    if (!user) {
-      alert("로그인이 필요합니다.");
-      return;
-    }
-    // 1) 화면 동작은 먼저 진행
-    setData((prev) => ({
-      ...prev,
-      major: trimmedMajor,
-      nickname: trimmedNickname,
-    }));
-
-    registerStudentLocal(trimmedMajor, trimmedNickname);
+  const enterWorkbook = ({ courseId, courseName, synced }) => {
+    const major = data.major.trim();
+    const nickname = data.nickname.trim();
+    setData(prev => ({ ...prev, major, nickname, courseId, courseName, participationSynced: synced }));
+    registerStudentLocal(major, nickname, courseId, courseName);
     setShowWelcomeModal(false);
-
-    // 2) Firebase 저장
-    try {
-      await setDoc(
-        doc(db, "students", user.uid),
-        {
-          uid: user.uid,
-          major: trimmedMajor,
-          nickname: trimmedNickname,
-          joinedAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      alert("학생 프로필이 저장되었습니다.");
-    } catch (error) {
-      console.error("학생 프로필 저장 실패:", error);
-      alert("학생 프로필 저장 중 오류가 발생했습니다.");
-    }
-  }; // ← submitWelcomeInfo 함수 종료
-
-  const openAdminModal = () => {
-    if (!isAdmin) {
-      const input = window.prompt("관리자 코드를 입력하세요.");
-
-      if (input === null) return;
-
-      if (input !== ADMIN_ACCESS_CODE) {
-        alert("관리자 코드가 올바르지 않습니다.");
-        return;
-      }
-
-      setIsAdmin(true);
-    }
-
-    setShowAdminModal(true);
   };
+
+  const openAdminModal = () => window.location.assign("/admin");
 
   const resetAll = () => {
     const ok = window.confirm("입력한 내용을 모두 초기화할까요?");
@@ -261,7 +223,7 @@ export default function App() {
 문항: ${data.question}
 채용공고/JD: ${data.jdText}
 
-[경험 선택]
+[면접관의 시선으로 경험 탐색]
 경험 제목: ${data.experienceTitle}
 경험 요약: ${data.experienceSummary}
 
@@ -323,7 +285,7 @@ ${data.reflection}`;
             new Paragraph(`문항: ${data.question}`),
             new Paragraph(`채용공고/JD: ${data.jdText}`),
             new Paragraph(""),
-            new Paragraph(`[경험 선택]`),
+            new Paragraph(`[면접관의 시선으로 경험 탐색]`),
             new Paragraph(`경험 제목: ${data.experienceTitle}`),
             new Paragraph(`경험 요약: ${data.experienceSummary}`),
             new Paragraph(""),
@@ -417,7 +379,7 @@ ${data.reflection}`;
           <p><strong>문항:</strong><br />${escapeHtml(data.question)}</p>
           <p><strong>채용공고/JD:</strong><br />${escapeHtml(data.jdText)}</p>
   
-          <h2>경험 선택</h2>
+          <h2>면접관의 시선으로 경험 탐색</h2>
           <p><strong>경험 제목:</strong> ${escapeHtml(data.experienceTitle)}</p>
           <p><strong>경험 요약:</strong><br />${escapeHtml(
             data.experienceSummary
@@ -542,21 +504,16 @@ Result: ${data.result || "[결과 입력]"}
       <style>{globalCss}</style>
 
       {showWelcomeModal && (
-        <WelcomeModal
+        <CourseEntry
           major={data.major}
           nickname={data.nickname}
           onMajorChange={(value) => updateField("major", value)}
           onNicknameChange={(value) => updateField("nickname", value)}
-          onSubmit={submitWelcomeInfo}
+          onEnter={enterWorkbook}
+          onInstructor={openAdminModal}
         />
       )}
 
-      {showAdminModal && (
-        <AdminStudentListModal
-          studentList={studentList}
-          onClose={() => setShowAdminModal(false)}
-        />
-      )}
 
       <div style={pageStyle}>
         <Header
@@ -571,6 +528,8 @@ Result: ${data.result || "[결과 입력]"}
           onReset={resetAll}
           onOpenAdmin={openAdminModal}
           savedNotice={savedNotice}
+          courseName={data.courseName}
+          onChangeParticipation={() => setShowWelcomeModal(true)}
         />
 
         <div style={styles.stepRow}>
@@ -587,7 +546,7 @@ Result: ${data.result || "[결과 입력]"}
           ))}
         </div>
 
-        <div style={styles.mainGrid}>
+        <div className="workbook-main-grid" style={styles.mainGrid}>
           <div style={styles.leftColumn}>
             {currentStep === 0 && (
               <SectionCard
@@ -641,25 +600,38 @@ Result: ${data.result || "[결과 입력]"}
 
             {currentStep === 1 && (
               <SectionCard
-                title="2단계. 경험 선택"
-                description="단순 활동이 아니라, 내가 한 행동과 문제해결 과정이 드러나는 경험을 골라보세요."
-                tip="좋은 경험은 결과보다 행동을 설명하기 쉬운 경험입니다."
+                title="2단계. 면접관의 시선으로 경험 탐색"
+                description="면접관은 경험의 규모보다 그 안에서 드러나는 생각과 행동을 살펴봅니다. 아래 4대 핵심역량을 참고해 나의 경험을 자유롭게 탐색해보세요."
+                tip="수업, 아르바이트, 동아리, 팀 프로젝트, 일상 속 작은 경험도 좋습니다. 모든 역량을 담을 필요는 없습니다."
                 icon="📌"
               >
+                <div className="experience-competency-grid" aria-label="면접관이 살펴보는 4대 핵심역량">
+                  {experienceCompetencies.map(({ title, description, question }, index) => (
+                    <article className="experience-competency-card" key={title}>
+                      <h3>{index + 1}) {title}</h3>
+                      <p>{description}</p>
+                      <p className="experience-competency-question">돌아볼 질문: {question}</p>
+                    </article>
+                  ))}
+                </div>
+                <p className="experience-writing-guide">
+                  떠오르는 경험을 편하게 적어보세요. 여러 경험을 메모해도 좋습니다.
+                  그중 다음 STAR 단계에서 구체화할 경험을 중심으로 제목과 내용을 정리해보세요.
+                </p>
                 <Field
                   label="경험 제목"
                   value={data.experienceTitle}
                   onChange={(value) => updateField("experienceTitle", value)}
-                  placeholder="예: 교내 마케팅 프로젝트, 캡스톤디자인, 인턴십"
+                  placeholder="예: 고객의 불편을 개선한 아르바이트, 팀원과 갈등을 풀었던 프로젝트"
                 />
                 <Field
-                  label="경험 요약"
+                  label="나의 경험 자유롭게 작성하기"
                   value={data.experienceSummary}
                   onChange={(value) => updateField("experienceSummary", value)}
-                  placeholder="이 경험에서 무슨 문제를 마주했고, 내가 무엇을 했는지 3~5문장으로 요약해보세요."
+                  placeholder="어떤 상황이었나요? 내가 생각하고 행동한 일, 주변의 반응, 결과와 배운 점을 자유롭게 적어보세요. 아직 정리되지 않은 메모도 괜찮습니다."
                   textarea
                   rows={8}
-                  help="체크 질문: 문제 상황이 있었는가? 내가 한 행동을 설명할 수 있는가? 지원 직무와 연결 가능한가?"
+                  help="분량이나 형식에 제한은 없습니다. 카드의 질문을 참고하되, 실제로 겪은 일과 나의 역할을 내 말로 적어보세요."
                 />
               </SectionCard>
             )}
@@ -827,10 +799,12 @@ Result: ${data.result || "[결과 입력]"}
             </div>
           </div>
 
-          <div style={styles.rightColumn}>
+          <div className="workbook-sidebar" style={styles.rightColumn}>
             <SidebarCard title="사용자 정보" icon="👤">
+              <InfoRow label="참가 교과목" value={data.courseName || "미선택"} />
               <InfoRow label="전공" value={data.major || "미입력"} />
               <InfoRow label="닉네임" value={data.nickname || "미입력"} />
+              {data.courseId && !data.participationSynced && <p role="status" style={styles.noticeBox}>현재 브라우저에만 저장됩니다. Firebase 연결 후 다시 입장하면 교수자 참가 목록에 등록됩니다.</p>}
               <div style={styles.noticeBox}>
                 현재 접속 표시 {visitorCount}명은 이 기기 브라우저 기준 누적
                 표시입니다.
@@ -859,7 +833,7 @@ Result: ${data.result || "[결과 입력]"}
                   )}
                 />
                 <ProgressItem
-                  label="경험 선택"
+                  label="면접관의 시선으로 경험 탐색"
                   done={Boolean(data.experienceTitle && data.experienceSummary)}
                 />
                 <ProgressItem
@@ -906,86 +880,6 @@ Result: ${data.result || "[결과 입력]"}
   );
 }
 
-function WelcomeModal({
-  major,
-  nickname,
-  onMajorChange,
-  onNicknameChange,
-  onSubmit,
-}) {
-  return (
-    <div style={styles.modalOverlay}>
-      <div style={{ ...glassCardStyle, ...styles.modalCard }}>
-        <div style={styles.modalEmoji}>👋</div>
-        <h2 style={styles.modalTitle}>시작하기 전에 알려주세요</h2>
-        <p style={styles.modalDesc}>
-          앱 사용을 위해 전공과 닉네임을 먼저 입력해주세요.
-        </p>
-        <Field
-          label="전공"
-          value={major}
-          onChange={onMajorChange}
-          placeholder="예: 경영학과, 심리학과, 컴퓨터공학과"
-        />
-        <Field
-          label="닉네임"
-          value={nickname}
-          onChange={onNicknameChange}
-          placeholder="앱에서 사용할 이름을 입력하세요"
-        />
-        <button
-          type="button"
-          onClick={onSubmit}
-          style={{ ...styles.primaryButton, width: "100%", marginTop: 8 }}
-        >
-          시작하기
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function AdminStudentListModal({ studentList, onClose }) {
-  return (
-    <div style={styles.modalOverlay}>
-      <div style={{ ...glassCardStyle, ...styles.adminModalCard }}>
-        <div style={styles.adminModalHeader}>
-          <div>
-            <div style={styles.adminModalTitle}>관리자 전용 학생 참여 목록</div>
-            <div style={styles.adminModalSubTitle}>
-              닉네임, 전공, 입력 시각을 확인할 수 있습니다.
-            </div>
-          </div>
-          <button type="button" onClick={onClose} style={styles.closeButton}>
-            닫기
-          </button>
-        </div>
-
-        {studentList.length === 0 ? (
-          <div style={styles.emptyStudentBox}>아직 등록된 학생이 없습니다.</div>
-        ) : (
-          <div style={styles.studentListWrap}>
-            {studentList.map((student, index) => (
-              <div
-                key={`${student.nickname}-${student.major}-${index}`}
-                style={styles.studentItem}
-              >
-                <div style={styles.studentTopRow}>
-                  <span style={styles.studentNickname}>{student.nickname}</span>
-                  <span style={styles.studentMajor}>{student.major}</span>
-                </div>
-                <div style={styles.studentJoinedAt}>
-                  입력 시각: {student.joinedAt}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function Header({
   completedCount,
   progressPercent,
@@ -998,6 +892,8 @@ function Header({
   onReset,
   onOpenAdmin,
   savedNotice,
+  courseName,
+  onChangeParticipation,
 }) {
   return (
     <div style={{ ...glassCardStyle, padding: 24, marginBottom: 18 }}>
@@ -1016,6 +912,7 @@ function Header({
           </p>
           {(major || nickname) && (
             <div style={styles.tagRow}>
+              {courseName && <span style={styles.infoTag}>참가: {courseName}</span>}
               {major ? <span style={styles.infoTag}>전공: {major}</span> : null}
               {nickname ? (
                 <span style={styles.infoTagBlue}>닉네임: {nickname}</span>
@@ -1024,6 +921,7 @@ function Header({
           )}
         </div>
         <div style={styles.headerButtons}>
+          <button type="button" onClick={onChangeParticipation} style={styles.secondaryButton}>참가 교과목 변경</button>
           <button
             type="button"
             onClick={onDownloadText}
@@ -1055,7 +953,7 @@ function Header({
             onClick={onOpenAdmin}
             style={styles.adminButton}
           >
-            관리자 학생 목록
+            교수자 교과목·참가 목록
           </button>
         </div>
       </div>
@@ -1078,7 +976,7 @@ function Header({
 
 function SectionCard({ title, description, tip, icon, children }) {
   return (
-    <div style={{ ...glassCardStyle, padding: 28 }}>
+    <div className="workbook-section" style={{ ...glassCardStyle, padding: 28 }}>
       <div style={{ marginBottom: 20 }}>
         <div style={styles.sectionTitleRow}>
           <span style={styles.sectionIconBubble}>{icon}</span>
@@ -1673,7 +1571,32 @@ const globalCss = `
     border-color: #b9acf9 !important;
     box-shadow: 0 0 0 4px rgba(155,124,246,0.12);
   }
+  .workbook-main-grid > div { min-width: 0; }
+  .experience-competency-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .experience-competency-card {
+    min-width: 0;
+    padding: 18px;
+    border: 1px solid #e7ddf7;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.85);
+    overflow-wrap: anywhere;
+  }
+  .experience-competency-card h3 { margin: 0 0 10px; font-size: 16px; color: #6f5ce7; }
+  .experience-competency-card p { margin: 0; font-size: 14px; line-height: 1.7; }
+  .experience-competency-card .experience-competency-question { margin-top: 12px; color: #6d6875; }
+  .experience-writing-guide { margin: 0; font-size: 14px; line-height: 1.7; color: #6d6875; }
+  .workbook-section { min-width: 0; overflow-wrap: anywhere; }
+  @media (max-width: 600px) {
+    .experience-competency-grid { grid-template-columns: minmax(0, 1fr); }
+    .workbook-section { padding: 18px !important; }
+  }
   @media (max-width: 920px) {
+    .workbook-main-grid { grid-template-columns: minmax(0, 1fr) !important; }
+    .workbook-sidebar { position: static !important; }
     div[style*="grid-template-columns: repeat(3"] {
       grid-template-columns: 1fr !important;
     }

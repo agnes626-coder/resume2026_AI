@@ -1,0 +1,127 @@
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+import { CourseEntry, InstructorConsole } from './CourseEntry';
+import * as service from './courseService';
+jest.mock('./firebase', () => ({}));
+jest.mock('./courseService', () => ({ listCourses: jest.fn(), joinCourse: jest.fn(), loginInstructor: jest.fn(), loginEmailInstructor: jest.fn(), registerInstructorAccount: jest.fn(), resendInstructorVerification: jest.fn(), resetInstructorPassword: jest.fn(), loadDashboard: jest.fn(), saveCourse: jest.fn(), saveInstructor: jest.fn(), deleteInstructor: jest.fn(), logoutInstructor: jest.fn(), courseError: error => error.message }));
+jest.mock('docx', () => ({ Document: jest.fn(), Packer: {}, Paragraph: jest.fn(), TextRun: jest.fn() }));
+jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
+global.IS_REACT_ACT_ENVIRONMENT = true;
+let container, root;
+beforeEach(() => {
+  localStorage.clear(); jest.clearAllMocks();
+  service.listCourses.mockResolvedValue({ courses: [{ id: 'class-1', name: '교과목 A' }, { id: 'class-2', name: '교과목 B' }] });
+  container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+});
+afterEach(() => { act(() => root.unmount()); container.remove(); });
+const render = async element => { await act(async () => root.render(element)); };
+const click = async text => { await act(async () => Array.from(container.querySelectorAll('button')).find(b => b.textContent.includes(text)).click()); };
+const change = (element, value) => act(() => {
+  const prototype = element.tagName === 'SELECT' ? HTMLSelectElement.prototype : element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
+  element.dispatchEvent(new Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+});
+test('existing experience data survives step navigation and edits', async () => {
+  localStorage.setItem('ai_self_intro_full_app_v1', JSON.stringify({ major: '전공', nickname: '학생', courseId: 'general', courseName: '일반참가용', experienceTitle: '기존 제목', experienceSummary: '기존 내용' }));
+  await render(<App />); await click('2단계');
+  expect(container.querySelectorAll('.experience-competency-card')).toHaveLength(4);
+  expect(container.querySelector('.workbook-section input').value).toBe('기존 제목');
+  change(container.querySelector('.workbook-section textarea'), '자유 작성\n두 번째 줄');
+  await click('3단계'); await click('2단계');
+  expect(container.querySelector('.workbook-section textarea').value).toBe('자유 작성\n두 번째 줄');
+  expect(JSON.parse(localStorage.getItem('ai_self_intro_full_app_v1')).experienceSummary).toBe('자유 작성\n두 번째 줄');
+});
+test('general admission requires no code and enters offline transparently', async () => {
+  service.joinCourse.mockRejectedValue(new Error('서버 미연결'));
+  const entered = jest.fn();
+  await render(<CourseEntry major="전공" nickname="학생" onMajorChange={() => {}} onNicknameChange={() => {}} onEnter={entered} />);
+  expect(container.querySelector('input[type=password]')).toBeNull();
+  await click('시작하기');
+  expect(service.joinCourse).toHaveBeenCalledWith({ courseId: 'general', accessCode: '', major: '전공', nickname: '학생' });
+  expect(entered).toHaveBeenCalledWith({ courseId: 'general', courseName: '일반참가용', synced: false });
+});
+test('course entry blocks invalid codes and records the validated course', async () => {
+  const entered = jest.fn();
+  await render(<CourseEntry major="전공" nickname="학생" onMajorChange={() => {}} onNicknameChange={() => {}} onEnter={entered} />);
+  change(container.querySelector('select'), 'class-2'); change(container.querySelector('input[type=password]'), 'wrong');
+  service.joinCourse.mockRejectedValueOnce(new Error('인증번호 오류'));
+  await click('시작하기');
+  expect(entered).not.toHaveBeenCalled();
+  expect(container.querySelector('[role=alert]').textContent).toBe('인증번호 오류');
+  change(container.querySelector('input[type=password]'), 'correct');
+  service.joinCourse.mockResolvedValueOnce({ courseId: 'class-2', courseName: '교과목 B' });
+  await click('시작하기');
+  expect(entered).toHaveBeenCalledWith({ courseId: 'class-2', courseName: '교과목 B', synced: true });
+});
+test('professor page blocks unregistered accounts and manages courses and participant filtering', async () => {
+  service.loginInstructor.mockRejectedValueOnce(new Error('교수자 권한 없음'));
+  await render(<InstructorConsole standalone onClose={() => {}} />); await click('Google로');
+  expect(container.querySelector('[role=alert]').textContent).toContain('권한 없음');
+  const dashboard = { courses: [{ id: 'class-1', name: '교과목 A', active: true }], participants: [{ id: 'p1', courseId: 'class-1', courseName: '교과목 A', nickname: '수업 학생', major: '전공' }, { id: 'p2', courseId: 'general', courseName: '일반참가용', nickname: '일반 학생', major: '전공' }] };
+  service.loginInstructor.mockResolvedValueOnce(dashboard); service.loadDashboard.mockResolvedValue(dashboard);
+  await click('Google로'); expect(container.textContent).toContain('참가자 2명');
+  change(container.querySelector('select'), 'general');
+  expect(container.textContent).toContain('참가자 1명'); expect(container.textContent).not.toContain('수업 학생');
+  const fields = container.querySelectorAll('form input'); change(fields[0], '새 교과목'); change(fields[1], 'newcode');
+  await click('교과목 저장'); expect(service.saveCourse).toHaveBeenCalledWith({ id: null, name: '새 교과목', accessCode: 'newcode', active: true });
+  expect(container.textContent).not.toContain('교수자 계정 관리');
+});
+test('owner can add future professors from the management page', async () => {
+  const dashboard = { canManageInstructors: true, instructors: [], courses: [], participants: [] };
+  service.loginInstructor.mockResolvedValueOnce(dashboard); service.loadDashboard.mockResolvedValue(dashboard);
+  await render(<InstructorConsole standalone onClose={() => {}} />); await click('Google로');
+  change(container.querySelector('input[type=email]'), 'next@example.edu'); await click('교수자 등록');
+  expect(service.saveInstructor).toHaveBeenCalledWith({ email: 'next@example.edu', active: true });
+});
+
+test('email login opens participant management and clears credentials after success', async () => {
+  const dashboard = { canManageInstructors: false, courses: [], participants: [] };
+  service.loginEmailInstructor.mockRejectedValueOnce(new Error('이메일 인증 필요')).mockResolvedValueOnce(dashboard);
+  await render(<InstructorConsole standalone onClose={() => {}} />);
+  change(container.querySelector('input[type=email]'), 'next@example.edu'); change(container.querySelector('input[type=password]'), 'test-password');
+  await click('이메일로 로그인');
+  expect(container.querySelector('[role=alert]').textContent).toBe('이메일 인증 필요');
+  await click('이메일로 로그인');
+  expect(service.loginEmailInstructor).toHaveBeenCalledWith({ email: 'next@example.edu', password: 'test-password' });
+  expect(container.textContent).toContain('참가자 0명'); expect(container.textContent).not.toContain('교수자 계정 관리');
+  await click('로그아웃'); expect(container.querySelector('input[type=password]').value).toBe('');
+});
+test('first-time account flow validates confirmation and guides email verification', async () => {
+  service.registerInstructorAccount.mockResolvedValue();
+  await render(<InstructorConsole standalone onClose={() => {}} />); await click('처음 이용');
+  change(container.querySelector('input[type=email]'), 'next@example.edu');
+  const passwords = container.querySelectorAll('input[type=password]');
+  change(passwords[0], 'test-password'); change(passwords[1], 'different');
+  await click('계정 만들고'); expect(service.registerInstructorAccount).not.toHaveBeenCalled();
+  expect(container.querySelector('[role=alert]').textContent).toContain('일치하지');
+  change(passwords[1], 'test-password'); await click('계정 만들고');
+  expect(service.registerInstructorAccount).toHaveBeenCalledWith({ email: 'next@example.edu', password: 'test-password' });
+  expect(container.textContent).toContain('인증 메일을 보냈습니다');
+  expect(container.querySelector('input[type=password]').value).toBe('');
+  expect(container.textContent).not.toContain('참가자 0명');
+});
+test('password reset uses email only and verification resend uses entered credentials', async () => {
+  service.resetInstructorPassword.mockResolvedValue(); service.resendInstructorVerification.mockResolvedValue({ alreadyVerified: false });
+  await render(<InstructorConsole standalone onClose={() => {}} />);
+  change(container.querySelector('input[type=email]'), 'next@example.edu'); await click('비밀번호 재설정');
+  expect(container.querySelector('input[type=password]')).toBeNull(); await click('재설정 메일 받기');
+  expect(service.resetInstructorPassword).toHaveBeenCalledWith('next@example.edu');
+  await click('이메일 로그인으로 돌아가기'); change(container.querySelector('input[type=password]'), 'test-password');
+  await click('인증 메일 다시 보내기');
+  expect(service.resendInstructorVerification).toHaveBeenCalledWith({ email: 'next@example.edu', password: 'test-password' });
+  expect(container.textContent).toContain('인증 메일을 다시 보냈습니다');
+});
+test('owner can delete only stopped instructors after confirmation', async () => {
+  const dashboard = { canManageInstructors: true, instructors: [{ email: 'active@example.edu', active: true }, { email: 'stopped@example.edu', active: false }], courses: [], participants: [] };
+  service.loginInstructor.mockResolvedValueOnce(dashboard);
+  service.loadDashboard.mockResolvedValue({ ...dashboard, instructors: [dashboard.instructors[0]] });
+  service.deleteInstructor.mockResolvedValue();
+  const confirm = jest.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+  await render(<InstructorConsole standalone onClose={() => {}} />); await click('Google로');
+  expect(container.querySelectorAll('button[aria-label$="교수자 삭제"]')).toHaveLength(1);
+  await click('삭제'); expect(service.deleteInstructor).not.toHaveBeenCalled();
+  await click('삭제'); expect(service.deleteInstructor).toHaveBeenCalledWith('stopped@example.edu');
+  expect(container.textContent).not.toContain('stopped@example.edu'); expect(container.textContent).toContain('active@example.edu');
+  confirm.mockRestore();
+});

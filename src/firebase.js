@@ -2,14 +2,23 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCdbK9xjgc_8NAzMqPOGXe-OEL5EAcj28k",
-  authDomain: "sonorous-stone-492010-j8.firebaseapp.com",
-  projectId: "sonorous-stone-492010-j8",
-  storageBucket: "sonorous-stone-492010-j8.firebasestorage.app",
-  messagingSenderId: "64464531174",
-  appId: "1:64464531174:web:e922b3e2875bc0decbd527",
-  measurementId: "G-YTLDWZL7PW",
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID,
 };
 
-const app = initializeApp(firebaseConfig);
+export const firebaseConfigured = Boolean(
+  firebaseConfig.apiKey && firebaseConfig.authDomain && firebaseConfig.projectId && firebaseConfig.appId
+);
+
+// 설정 전에는 데모 설정만 초기화하며 Firebase 네트워크 요청은 courseService에서 차단합니다.
+const app = initializeApp(firebaseConfigured ? firebaseConfig : {
+  apiKey: "demo-key",
+  authDomain: "demo-resume-workbook.firebaseapp.com",
+  projectId: "demo-resume-workbook",
+  appId: "demo-app",
+});
 export const db = getFirestore(app);
