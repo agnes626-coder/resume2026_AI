@@ -22,6 +22,33 @@ const change = (element, value) => act(() => {
   Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
   element.dispatchEvent(new Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
 });
+test('empty experience list leads to adding a real example and using it for STAR across reload', async () => {
+  localStorage.setItem('ai_self_intro_full_app_v1', JSON.stringify({ major: '전공', nickname: '학생', courseId: 'general', question: '협업 경험을 설명하세요' }));
+  await render(<App />); await click('3단계');
+  expect(container.querySelector('.experience-selection select')).toBeNull();
+  await click('2단계에서 경험·사례 추가하기');
+  expect(container.querySelector('.experience-selection')).toBeNull();
+  const addButton = Array.from(container.querySelectorAll('button')).find(button => button.textContent === '+ 경험·사례 추가');
+  expect(addButton.compareDocumentPosition(container.querySelector('.experience-empty')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await click('+ 경험·사례 추가');
+  const card = container.querySelector('.experience-memo-card');
+  expect(document.activeElement).toBe(card.querySelector('input'));
+  change(card.querySelector('input'), '팀 프로젝트 의견 조율');
+  change(card.querySelector('textarea'), '팀원들의 제안을 비교하고 역할을 조정했습니다.');
+  const selection = container.querySelector('.experience-selection select');
+  expect(Array.from(selection.options).map(option => option.textContent)).toContain('경험 1: 팀 프로젝트 의견 조율');
+  change(selection, selection.options[1].value);
+  await click('선택한 경험으로 STAR 작성');
+  expect(container.querySelector('.experience-selection [role=status]').textContent).toContain('팀 프로젝트 의견 조율');
+  const saved = JSON.parse(localStorage.getItem('ai_self_intro_full_app_v1'));
+  expect(saved.question).toBe('협업 경험을 설명하세요');
+  expect(saved.experienceTitle).toBe('팀 프로젝트 의견 조율');
+  expect(saved.experienceSummary).toBe('팀원들의 제안을 비교하고 역할을 조정했습니다.');
+  await act(async () => { root.unmount(); root = createRoot(container); root.render(<App />); });
+  await click('3단계');
+  expect(container.querySelector('.experience-selection select').value).toBe(saved.selectedExperienceId);
+});
+
 test('existing experience data survives step navigation and edits', async () => {
   localStorage.setItem('ai_self_intro_full_app_v1', JSON.stringify({ major: '전공', nickname: '학생', courseId: 'general', courseName: '일반참가용', experienceTitle: '기존 제목', experienceSummary: '기존 내용' }));
   await render(<App />); await click('2단계');
@@ -39,7 +66,7 @@ test('multiple questions retain their own experience and drafts across selection
   expect(container.querySelector('[aria-label="자기소개서 문항 1"] textarea').value).toBe('첫 문항');
   await click('+ 문항 추가');
   change(container.querySelector('[aria-label="자기소개서 문항 2"] textarea'), '둘째 문항');
-  await click('2단계'); await click('+ 경험 추가');
+  await click('2단계'); await click('+ 경험·사례 추가');
   const secondExperience = container.querySelectorAll('.experience-memo-card')[1];
   expect(secondExperience.querySelector('input').value).toBe('');
   change(secondExperience.querySelector('input'), '둘째 제목'); change(secondExperience.querySelector('textarea'), '둘째 경험');
@@ -190,7 +217,7 @@ test('experience exploration adds shared memos, switches writing, archives and r
   localStorage.setItem('ai_self_intro_full_app_v1', JSON.stringify({ major: '전공', nickname: '학생', courseId: 'general', question: '문항', experienceTitle: '기존 경험', experienceSummary: '기존 메모', action: '기존 행동', draft: '기존 초안' }));
   await render(<App />); await click('2단계');
   expect(container.querySelectorAll('.experience-competency-card')).toHaveLength(4);
-  await click('+ 경험 추가');
+  await click('+ 경험·사례 추가');
   const second = container.querySelectorAll('.experience-memo-card')[1];
   change(second.querySelector('input'), '새 경험'); change(second.querySelector('textarea'), '새 경험 메모');
   expect(JSON.parse(localStorage.getItem('ai_self_intro_full_app_v1')).experienceTitle).toBe('기존 경험');

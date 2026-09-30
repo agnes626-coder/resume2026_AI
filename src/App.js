@@ -10,7 +10,10 @@ import { ExperienceExplorer, ExperienceSelection } from "./ExperienceExplorer";
 
 import { StarStructure } from "./StarStructure";
 
-import { buildDraftPrompt } from "./workbookPrompts";
+import { CompetencyConnection } from "./CompetencyConnection";
+import { competencyConnectionComplete } from "./competencyConnections";
+
+import { buildDraftPrompt, buildCompetencyPrompt } from "./workbookPrompts";
 
 const STORAGE_KEY = "ai_self_intro_full_app_v1";
 const STUDENT_LIST_KEY = "ai_self_intro_student_list_v1";
@@ -21,7 +24,7 @@ const steps = [
   { key: "basic", label: "지원정보·문항 설정", icon: "🎯" },
   { key: "experience", label: "면접관의 시선으로 경험 탐색", icon: "📌" },
   { key: "star", label: "STAR 구조화", icon: "🧠" },
-  { key: "competency", label: "역량 추출", icon: "✨" },
+  { key: "competency", label: "역량 연결", icon: "✨" },
   { key: "draft", label: "초안 작성", icon: "✍️" },
   { key: "feedback", label: "AI 첨삭", icon: "🤖" },
   { key: "final", label: "최종본", icon: "🏁" },
@@ -73,6 +76,7 @@ const defaultData = {
   companyName: "",
   question: "",
   jdText: "",
+  jdRequirements: "",
   experienceTitle: "",
   experienceSummary: "",
   situation: "",
@@ -80,6 +84,8 @@ const defaultData = {
   action: "",
   result: "",
   competencies: "",
+  competencyEvidence: "",
+  jobConnection: "",
   draft: "",
   aiFeedback: "",
   revisedDraft: "",
@@ -355,7 +361,7 @@ export default function App() {
       Boolean(data.major && data.nickname && data.jobTitle && data.question),
       Boolean(data.experienceTitle && data.experienceSummary),
       Boolean(data.situation && data.task && data.action && data.result),
-      Boolean(data.competencies),
+      competencyConnectionComplete(data),
       Boolean(data.draft),
       Boolean(data.aiFeedback && data.revisedDraft),
       Boolean(data.finalDraft),
@@ -368,20 +374,7 @@ export default function App() {
   const draftCharCount = characterCount(data.draft, data.charCountMode);
   const countModeLabel = data.charCountMode === "excludeSpaces" ? "공백 제외" : "공백 포함";
 
-  const promptExperience = `아래 경험을 읽고, 자기소개서에서 강조할 수 있는 핵심 역량 3가지를 정리해줘.
-각 역량마다 근거가 되는 행동도 함께 설명해줘.
-
-전공: ${data.major || "[전공 입력]"}
-닉네임: ${data.nickname || "[닉네임 입력]"}
-지원 직무: ${data.jobTitle || "[지원 직무 입력]"}
-기업명: ${data.companyName || "[기업명 입력]"}
-문항: ${data.question || "[자기소개서 문항 입력]"}
-경험 제목: ${data.experienceTitle || "[경험 제목 입력]"}
-경험 요약: ${data.experienceSummary || "[경험 요약 입력]"}
-Situation: ${data.situation || "[상황 입력]"}
-Task: ${data.task || "[과제 입력]"}
-Action: ${data.action || "[행동 입력]"}
-Result: ${data.result || "[결과 입력]"}`;
+  const promptExperience = buildCompetencyPrompt(data);
 
   const promptDraft = buildDraftPrompt(data);
 
@@ -592,30 +585,15 @@ ${lengthInstruction(data)}
                 tip="강의안의 작성 기준: Action 약 60%. 내가 왜, 어떻게 행동했는지 구체적으로 보여주세요."
                 icon="🧠"
               >
-                <ExperienceSelection data={data} onSelect={id => setData(prev => selectExperience(prev, id))} />
+                <ExperienceSelection data={data} onSelect={id => setData(prev => selectExperience(prev, id))} onExplore={() => setCurrentStep(1)} buttonStyle={styles.secondaryButton} />
                 <StarStructure data={data} onChange={updateField} Field={Field} />
               </SectionCard>
             )}
 
             {currentStep === 3 && (
-              <SectionCard
-                title="4단계. 역량 추출"
-                description="아래 프롬프트를 복사해 AI에 넣고, 정리된 역량을 다시 이 앱에 기록하세요."
-                tip="AI가 제안한 역량 중 실제 경험으로 입증 가능한 것만 남기는 것이 중요합니다."
-                icon="✨"
-              >
-                <PromptBox
-                  title="역량 추출 프롬프트"
-                  prompt={promptExperience}
-                />
-                <Field
-                  label="AI가 정리한 핵심 역량"
-                  value={data.competencies}
-                  onChange={(value) => updateField("competencies", value)}
-                  placeholder="예: 데이터 기반 문제해결, 협업 조율, 실행력"
-                  textarea
-                  rows={10}
-                />
+              <SectionCard title="4단계. 역량 연결" description="경험의 구체적인 행동을 역량으로 설명하고, 지원 기업·직무·JD의 요구사항과 연결하세요." tip="역량 이름 → 나의 행동 근거 → 직무에서 활용할 방법을 함께 적어야 설득력이 생깁니다." icon="✨">
+                <ExperienceSelection data={data} onSelect={id => setData(prev => selectExperience(prev, id))} onExplore={() => setCurrentStep(1)} buttonStyle={styles.secondaryButton} />
+                <CompetencyConnection data={data} onChange={updateField} onBasic={() => setCurrentStep(0)} Field={Field} PromptBox={PromptBox} prompt={promptExperience} secondaryButton={styles.secondaryButton} />
               </SectionCard>
             )}
 
@@ -769,8 +747,8 @@ ${lengthInstruction(data)}
                   )}
                 />
                 <ProgressItem
-                  label="역량 추출"
-                  done={Boolean(data.competencies)}
+                  label="역량 연결"
+                  done={competencyConnectionComplete(data)}
                 />
                 <ProgressItem label="초안 작성" done={Boolean(data.draft)} />
                 <ProgressItem
@@ -1564,6 +1542,15 @@ const globalCss = `
   .star-action-target { position: absolute; top: -3px; bottom: -3px; left: 60%; width: 3px; background: #9e145b; border-radius: 2px; }
   @media (max-width: 600px) { .star-context-grid { grid-template-columns: minmax(0, 1fr); } .star-action-card { padding: 16px; } .star-action-heading h3 { font-size: 18px; } }
 
+  .competency-connection { display: grid; gap: 16px; min-width: 0; }
+  .competency-connection p { margin: 0; font-size: 14px; line-height: 1.8; color: #6d6875; }
+  .competency-connection-card { display: grid; gap: 12px; min-width: 0; padding: 16px; border: 1px solid #e7ddf7; border-radius: 16px; background: #fcfaff; }
+  .competency-connection-card h3 { margin: 0; font-size: 17px; color: #6b55c7; }
+  .competency-reference { min-width: 0; padding: 12px 16px; background: #f8f5ff; border: 1px solid #e7ddf7; border-radius: 14px; }
+  .competency-reference summary { cursor: pointer; font-weight: 700; }
+  .competency-reference dl { display: grid; gap: 12px; }
+  .competency-reference dt { font-weight: 700; }
+  .competency-reference dd { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.8; }
   .experience-explorer { display: grid; gap: 14px; min-width: 0; }
   .experience-explorer h3, .experience-explorer h4, .experience-explorer p { margin: 0; }
   .experience-explorer p, .experience-selection p { font-size: 14px; line-height: 1.7; color: #6d6875; }
