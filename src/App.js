@@ -8,6 +8,8 @@ import { normalizeWorkbook, updateWorkbookField, updateQuestion, editQuestion, s
 import { addExperience, updateExperience, selectExperience, archiveExperience, restoreExperience } from "./experienceWorkbooks";
 import { ExperienceExplorer, ExperienceSelection } from "./ExperienceExplorer";
 
+import { StarStructure } from "./StarStructure";
+
 import { buildDraftPrompt } from "./workbookPrompts";
 
 const STORAGE_KEY = "ai_self_intro_full_app_v1";
@@ -18,7 +20,7 @@ const VISITED_SESSION_KEY = "ai_self_intro_session_visited_v1";
 const steps = [
   { key: "basic", label: "지원정보·문항 설정", icon: "🎯" },
   { key: "experience", label: "면접관의 시선으로 경험 탐색", icon: "📌" },
-  { key: "star", label: "STAR 정리", icon: "🧠" },
+  { key: "star", label: "STAR 구조화", icon: "🧠" },
   { key: "competency", label: "역량 추출", icon: "✨" },
   { key: "draft", label: "초안 작성", icon: "✍️" },
   { key: "feedback", label: "AI 첨삭", icon: "🤖" },
@@ -585,44 +587,13 @@ ${lengthInstruction(data)}
 
             {currentStep === 2 && (
               <SectionCard
-                title="3단계. STAR 정리"
-                description="상황-과제-행동-결과를 나누어 쓰면 자기소개서 내용이 훨씬 선명해집니다."
-                tip="특히 Action은 가장 자세하게 적어주세요. 어떤 방식으로 해결했는지가 핵심입니다."
+                title="3단계. STAR 구조화"
+                description="선택한 경험을 S/T/A/R로 구체화하세요. Action은 의도·방법·본인 주도 역할이 드러나도록 가장 자세하게 작성합니다."
+                tip="강의안의 작성 기준: Action 약 60%. 내가 왜, 어떻게 행동했는지 구체적으로 보여주세요."
                 icon="🧠"
               >
                 <ExperienceSelection data={data} onSelect={id => setData(prev => selectExperience(prev, id))} />
-                <Field
-                  label="Situation (상황)"
-                  value={data.situation}
-                  onChange={(value) => updateField("situation", value)}
-                  placeholder="예: 팀 프로젝트 진행 중 일정 지연과 역할 충돌이 발생함"
-                  textarea
-                  rows={4}
-                />
-                <Field
-                  label="Task (과제)"
-                  value={data.task}
-                  onChange={(value) => updateField("task", value)}
-                  placeholder="예: 기획 파트를 맡아 일정 재정비와 팀 내 합의 도출이 필요했음"
-                  textarea
-                  rows={4}
-                />
-                <Field
-                  label="Action (행동)"
-                  value={data.action}
-                  onChange={(value) => updateField("action", value)}
-                  placeholder="예: 우선순위를 재설정하고, 팀원 의견을 분류해 회의 구조를 다시 설계함"
-                  textarea
-                  rows={6}
-                />
-                <Field
-                  label="Result (결과)"
-                  value={data.result}
-                  onChange={(value) => updateField("result", value)}
-                  placeholder="예: 일정 지연을 줄였고, 발표 평가에서 상위 점수를 받음"
-                  textarea
-                  rows={4}
-                />
+                <StarStructure data={data} onChange={updateField} Field={Field} />
               </SectionCard>
             )}
 
@@ -792,7 +763,7 @@ ${lengthInstruction(data)}
                   done={Boolean(data.experienceTitle && data.experienceSummary)}
                 />
                 <ProgressItem
-                  label="STAR 정리"
+                  label="STAR 구조화"
                   done={Boolean(
                     data.situation && data.task && data.action && data.result
                   )}
@@ -1563,6 +1534,36 @@ const globalCss = `
   .interviewer-level strong { display: block; margin-bottom: 6px; font-size: 14px; }
   .interviewer-level-target { border-color: #9e8cf3; background: #efe7ff; }
   .interviewer-guide .interviewer-level-focus { padding: 12px; border-radius: 12px; background: #fff; color: #5541b9; }
+  .star-structure { display: grid; gap: 18px; min-width: 0; }
+  .star-worked-example { min-width: 0; border: 1px solid #d9cdf7; border-radius: 14px; padding: 0 16px; background: #f8f5ff; }
+  .star-worked-example summary { padding: 14px 0; cursor: pointer; font-weight: 800; color: #5541b9; }
+  .star-worked-example p, .star-worked-example dd { font-size: 14px; line-height: 1.8; }
+  .star-worked-example dl { margin: 12px 0 16px; display: grid; gap: 14px; }
+  .star-worked-example dt { font-weight: 800; color: #5541b9; }
+  .star-worked-example dd { margin: 6px 0 0; }
+  .star-example-note { margin: 0; font-size: 13px; line-height: 1.7; color: #6d6875; }
+  .star-context-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .star-context-card { min-width: 0; padding: 16px; border: 1px solid #e7ddf7; border-radius: 16px; background: #fcfaff; }
+  .star-context-card h3 { margin: 0 0 10px; font-size: 16px; color: #6d6875; }
+  .star-action-card { min-width: 0; padding: 22px; border: 2px solid #8b7cf6; border-radius: 20px; background: #f3edff; box-shadow: 0 8px 24px rgba(112,92,231,.10); }
+  .star-action-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+  .star-action-heading h3 { margin: 0; font-size: 20px; color: #5541b9; }
+  .star-action-heading span { font-weight: 800; font-size: 13px; color: #fff; background: #6f5ce7; border-radius: 999px; padding: 8px 12px; }
+  .star-action-lead { margin: 12px 0; font-size: 15px; line-height: 1.8; }
+  .star-action-guide { margin: 0 0 16px; padding: 0 14px; border: 1px solid #d9cdf7; border-radius: 12px; background: #fff; }
+  .star-action-guide summary { cursor: pointer; padding: 12px 0; font-weight: 800; color: #5541b9; }
+  .star-action-guide ol { margin: 0; padding-left: 22px; }
+  .star-action-guide li, .star-action-guide p { font-size: 14px; line-height: 1.8; }
+  .star-action-guide li { margin-bottom: 8px; }
+  .star-action-guide p { margin: 12px 0; }
+  .star-action-balance { margin-top: 14px; padding: 14px; border: 1px solid #d9cdf7; border-radius: 12px; background: #fff; }
+  .star-action-balance p { margin: 8px 0 0; font-size: 13px; line-height: 1.7; color: #6d6875; }
+  .star-action-balance p:first-child { margin: 0 0 10px; font-size: 14px; font-weight: 800; color: #5541b9; }
+  .star-action-meter { position: relative; height: 14px; background: #e7ddf7; border-radius: 999px; }
+  .star-action-meter > div { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #9b7cf6, #6f5ce7); }
+  .star-action-target { position: absolute; top: -3px; bottom: -3px; left: 60%; width: 3px; background: #9e145b; border-radius: 2px; }
+  @media (max-width: 600px) { .star-context-grid { grid-template-columns: minmax(0, 1fr); } .star-action-card { padding: 16px; } .star-action-heading h3 { font-size: 18px; } }
+
   .experience-explorer { display: grid; gap: 14px; min-width: 0; }
   .experience-explorer h3, .experience-explorer h4, .experience-explorer p { margin: 0; }
   .experience-explorer p, .experience-selection p { font-size: 14px; line-height: 1.7; color: #6d6875; }
