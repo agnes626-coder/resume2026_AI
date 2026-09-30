@@ -1,8 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useId } from "react";
 import "./firebase";
 import { CourseEntry } from "./CourseEntry";
 import { Document, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
+import { normalizeWorkbook, updateWorkbookField, updateQuestion, editQuestion, selectQuestion, addQuestion, removeQuestion, workbookSections, workbookText, characterCount, draftTarget, lengthInstruction } from "./questionWorkbooks";
+
+import { buildDraftPrompt } from "./workbookPrompts";
 
 const STORAGE_KEY = "ai_self_intro_full_app_v1";
 const STUDENT_LIST_KEY = "ai_self_intro_student_list_v1";
@@ -10,7 +13,7 @@ const VISITOR_COUNT_KEY = "ai_self_intro_visitor_count_v1";
 const VISITED_SESSION_KEY = "ai_self_intro_session_visited_v1";
 
 const steps = [
-  { key: "basic", label: "기본 정보", icon: "🎯" },
+  { key: "basic", label: "지원정보·문항 설정", icon: "🎯" },
   { key: "experience", label: "면접관의 시선으로 경험 탐색", icon: "📌" },
   { key: "star", label: "STAR 정리", icon: "🧠" },
   { key: "competency", label: "역량 추출", icon: "✨" },
@@ -24,22 +27,38 @@ const experienceCompetencies = [
     title: "서비스 역량",
     description: "상대의 필요와 불편을 이해하고, 더 나은 경험을 제공하는 역량입니다.",
     question: "누군가의 필요를 알아차리고 도움을 주거나 불편을 개선한 적이 있나요?",
+    level3: "고객의 숨은 요구를 확인하고, 맡은 업무 안에서 새로운 서비스 방법을 생각해 실행합니다.",
+    level4: "독창적인 시도로 고객에게 감동을 주고, 서비스 제공 방식의 변화를 시도합니다.",
   },
   {
     title: "문제해결능력",
     description: "문제의 원인을 파악하고, 대안을 실행하며 결과를 점검하는 역량입니다.",
     question: "예상치 못한 문제를 어떻게 파악했고, 어떤 방법을 시도했나요?",
+    level3: "문제를 빠짐없이, 겹치지 않게 나누어 분석하고 근본 원인과 논리적인 대안을 제시합니다.",
+    level4: "문제가 다시 생기지 않도록 근본적인 조치를 실행하고, 체계적인 개선 성과를 만듭니다.",
   },
   {
     title: "책임감·커리어 오너십",
     description: "맡은 일을 끝까지 해내고, 자신의 성장과 진로를 주도적으로 만들어가는 역량입니다.",
     question: "끝까지 책임진 일이나, 스스로 목표를 세워 배우고 도전한 경험이 있나요?",
+    level3: "예상하지 못한 어려움에도 맡은 일을 완수하고, 팀 목표를 위해 먼저 나서서 행동합니다.",
+    level4: "시행착오와 배운 방법을 공유하여 동료가 겪을 위험이나 실수를 미리 줄입니다.",
   },
   {
     title: "협업능력·컬처애드",
-    description: "다른 관점을 존중하며 함께 일하고, 자신의 강점으로 팀에 긍정적인 변화를 더하는 역량입니다.",
-    question: "의견 차이를 조율하거나 나만의 관점과 강점으로 팀에 기여한 적이 있나요?",
+    description: "다른 의견을 존중하며 함께 일하고, 자신의 관점과 강점으로 팀에 긍정적인 변화를 더하는 역량입니다.",
+    question: "의견 차이를 조율하거나, 나의 관점과 강점을 더해 팀이 함께 목표를 달성한 경험이 있나요?",
+    level3: "남들이 꺼리는 일에 자원하고, 갈등 상황을 적극적으로 중재하여 협력을 이끌어냅니다.",
+    level4: "팀 목표를 먼저 생각해 각자의 역량을 합친 것 이상의 성과를 만들고, 조직 문화를 개선합니다.",
   },
+];
+
+const interviewerLevels = [
+  { level: 1, title: "수동적 행동", description: "지시와 지침에 따라 행동합니다." },
+  { level: 2, title: "통상적 행동", description: "해야 할 일을 제때 수행합니다." },
+  { level: 3, title: "능동적 행동", description: "명확한 의도와 판단에 근거해 행동합니다." },
+  { level: 4, title: "창조적 행동", description: "새로운 방법을 시도해 상황에 변화를 만듭니다." },
+  { level: 5, title: "패러다임 전환", description: "기존 사고의 틀을 바꾸고 새로운 환경을 만듭니다." },
 ];
 
 const defaultData = {
@@ -102,7 +121,8 @@ const glassCardStyle = {
 };
 export default function App() {
   const [currentStep, setCurrentStep] = useState(0);
-  const [data, setData] = useState(defaultData);
+  const [data, setData] = useState(() => normalizeWorkbook(defaultData));
+  const [storageReady, setStorageReady] = useState(false);
   const [visitorCount, setVisitorCount] = useState(0);
   const [, setStudentList] = useState([]);
   const [savedNotice, setSavedNotice] = useState(false);
@@ -113,7 +133,7 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        const merged = { ...defaultData, ...parsed };
+        const merged = normalizeWorkbook({ ...defaultData, ...parsed });
         setData(merged);
         if (!merged.major || !merged.nickname || !merged.courseId) {
           setShowWelcomeModal(true);
@@ -125,6 +145,7 @@ export default function App() {
       console.error("저장된 데이터를 불러오지 못했습니다.", error);
       setShowWelcomeModal(true);
     }
+    setStorageReady(true);
 
     try {
       const storedStudents = JSON.parse(
@@ -156,6 +177,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!storageReady) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       setSavedNotice(true);
@@ -164,11 +186,19 @@ export default function App() {
     } catch (error) {
       console.error("데이터를 저장하지 못했습니다.", error);
     }
-  }, [data]);
+  }, [data, storageReady]);
 
   const updateField = (key, value) => {
-    setData((prev) => ({ ...prev, [key]: value }));
+    setData((prev) => updateWorkbookField(prev, key, value));
   };
+
+  const addWorkbookQuestion = () => { setData(prev => addQuestion(prev)); setCurrentStep(0); };
+  const deleteWorkbookQuestion = (id, index) => {
+    if (data.questions.length <= 1) return;
+    if (!window.confirm(`문항 ${index + 1}과 이 문항의 경험·초안·최종본을 삭제할까요? 삭제한 내용은 복구할 수 없습니다.`)) return;
+    setData(prev => removeQuestion(prev, id));
+  };
+  const activeQuestionIndex = data.questions.findIndex(item => item.id === data.activeQuestionId);
 
   const registerStudentLocal = (major, nickname, courseId, courseName) => {
     const nextStudent = {
@@ -205,51 +235,13 @@ export default function App() {
     if (!ok) return;
 
     localStorage.removeItem(STORAGE_KEY);
-    setData(defaultData);
+    setData(normalizeWorkbook(defaultData));
     setCurrentStep(0);
     setShowWelcomeModal(true);
   };
 
   const downloadText = () => {
-    const content = `AI 기반 자기소개서 워크북
-
-[사용자 정보]
-전공: ${data.major}
-닉네임: ${data.nickname}
-
-[기본 정보]
-지원 직무: ${data.jobTitle}
-기업명: ${data.companyName}
-문항: ${data.question}
-채용공고/JD: ${data.jdText}
-
-[면접관의 시선으로 경험 탐색]
-경험 제목: ${data.experienceTitle}
-경험 요약: ${data.experienceSummary}
-
-[STAR]
-Situation: ${data.situation}
-Task: ${data.task}
-Action: ${data.action}
-Result: ${data.result}
-
-[역량 추출]
-${data.competencies}
-
-[초안]
-${data.draft}
-
-[AI 첨삭]
-${data.aiFeedback}
-
-[수정본]
-${data.revisedDraft}
-
-[최종본]
-${data.finalDraft}
-
-[점검 메모]
-${data.reflection}`;
+    const content = workbookText(data);
 
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -265,53 +257,15 @@ ${data.reflection}`;
       sections: [
         {
           children: [
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: "AI 기반 자기소개서 워크북",
-                  bold: true,
-                  size: 32,
-                }),
-              ],
-            }),
-            new Paragraph(""),
-            new Paragraph(`[사용자 정보]`),
-            new Paragraph(`전공: ${data.major}`),
-            new Paragraph(`닉네임: ${data.nickname}`),
-            new Paragraph(""),
-            new Paragraph(`[기본 정보]`),
-            new Paragraph(`지원 직무: ${data.jobTitle}`),
-            new Paragraph(`기업명: ${data.companyName}`),
-            new Paragraph(`문항: ${data.question}`),
-            new Paragraph(`채용공고/JD: ${data.jdText}`),
-            new Paragraph(""),
-            new Paragraph(`[면접관의 시선으로 경험 탐색]`),
-            new Paragraph(`경험 제목: ${data.experienceTitle}`),
-            new Paragraph(`경험 요약: ${data.experienceSummary}`),
-            new Paragraph(""),
-            new Paragraph(`[STAR]`),
-            new Paragraph(`Situation: ${data.situation}`),
-            new Paragraph(`Task: ${data.task}`),
-            new Paragraph(`Action: ${data.action}`),
-            new Paragraph(`Result: ${data.result}`),
-            new Paragraph(""),
-            new Paragraph(`[역량 추출]`),
-            new Paragraph(data.competencies || ""),
-            new Paragraph(""),
-            new Paragraph(`[초안]`),
-            new Paragraph(data.draft || ""),
-            new Paragraph(""),
-            new Paragraph(`[AI 첨삭]`),
-            new Paragraph(data.aiFeedback || ""),
-            new Paragraph(""),
-            new Paragraph(`[수정본]`),
-            new Paragraph(data.revisedDraft || ""),
-            new Paragraph(""),
-            new Paragraph(`[최종본]`),
-            new Paragraph(data.finalDraft || ""),
-            new Paragraph(""),
-            new Paragraph(`[점검 메모]`),
-            new Paragraph(data.reflection || ""),
+            new Paragraph({ children: [new TextRun({ text: "AI 기반 자기소개서 워크북", bold: true, size: 32 })] }),
+            ...workbookSections(data).flatMap(section => [
+              new Paragraph(""),
+              new Paragraph({ children: [new TextRun({ text: section.title, bold: true })] }),
+              ...section.fields.flatMap(([label, value]) => [
+                new Paragraph(label),
+                ...String(value || "").split("\n").map(line => new Paragraph(line)),
+              ]),
+            ]),
           ],
         },
       ],
@@ -369,45 +323,7 @@ ${data.reflection}`;
         <body>
           <h1>AI 기반 자기소개서 워크북</h1>
   
-          <h2>사용자 정보</h2>
-          <p><strong>전공:</strong> ${escapeHtml(data.major)}</p>
-          <p><strong>닉네임:</strong> ${escapeHtml(data.nickname)}</p>
-  
-          <h2>기본 정보</h2>
-          <p><strong>지원 직무:</strong> ${escapeHtml(data.jobTitle)}</p>
-          <p><strong>기업명:</strong> ${escapeHtml(data.companyName)}</p>
-          <p><strong>문항:</strong><br />${escapeHtml(data.question)}</p>
-          <p><strong>채용공고/JD:</strong><br />${escapeHtml(data.jdText)}</p>
-  
-          <h2>면접관의 시선으로 경험 탐색</h2>
-          <p><strong>경험 제목:</strong> ${escapeHtml(data.experienceTitle)}</p>
-          <p><strong>경험 요약:</strong><br />${escapeHtml(
-            data.experienceSummary
-          )}</p>
-  
-          <h2>STAR</h2>
-          <p><strong>Situation:</strong><br />${escapeHtml(data.situation)}</p>
-          <p><strong>Task:</strong><br />${escapeHtml(data.task)}</p>
-          <p><strong>Action:</strong><br />${escapeHtml(data.action)}</p>
-          <p><strong>Result:</strong><br />${escapeHtml(data.result)}</p>
-  
-          <h2>역량 추출</h2>
-          <p>${escapeHtml(data.competencies)}</p>
-  
-          <h2>초안</h2>
-          <p>${escapeHtml(data.draft)}</p>
-  
-          <h2>AI 첨삭</h2>
-          <p>${escapeHtml(data.aiFeedback)}</p>
-  
-          <h2>수정본</h2>
-          <p>${escapeHtml(data.revisedDraft)}</p>
-  
-          <h2>최종본</h2>
-          <p>${escapeHtml(data.finalDraft)}</p>
-  
-          <h2>점검 메모</h2>
-          <p>${escapeHtml(data.reflection)}</p>
+          ${workbookSections(data).map(section => `<section><h2>${escapeHtml(section.title)}</h2>${section.fields.map(([label, value]) => `<p><strong>${escapeHtml(label)}:</strong><br />${escapeHtml(value || "")}</p>`).join("")}</section>`).join("")}
         </body>
       </html>
     `;
@@ -429,8 +345,8 @@ ${data.reflection}`;
     };
   };
 
-  const completedCount = useMemo(() => {
-    const items = [
+  const completedSteps = useMemo(() => {
+    return [
       Boolean(data.major && data.nickname && data.jobTitle && data.question),
       Boolean(data.experienceTitle && data.experienceSummary),
       Boolean(data.situation && data.task && data.action && data.result),
@@ -439,14 +355,13 @@ ${data.reflection}`;
       Boolean(data.aiFeedback && data.revisedDraft),
       Boolean(data.finalDraft),
     ];
-    return items.filter(Boolean).length;
   }, [data]);
+  const completedCount = completedSteps.filter(Boolean).length;
 
   const progressPercent = Math.round((completedCount / steps.length) * 100);
-  const finalCharCount = useMemo(
-    () => data.finalDraft.replace(/\s/g, "").length,
-    [data.finalDraft]
-  );
+  const finalCharCount = characterCount(data.finalDraft, data.charCountMode);
+  const draftCharCount = characterCount(data.draft, data.charCountMode);
+  const countModeLabel = data.charCountMode === "excludeSpaces" ? "공백 제외" : "공백 포함";
 
   const promptExperience = `아래 경험을 읽고, 자기소개서에서 강조할 수 있는 핵심 역량 3가지를 정리해줘.
 각 역량마다 근거가 되는 행동도 함께 설명해줘.
@@ -463,21 +378,7 @@ Task: ${data.task || "[과제 입력]"}
 Action: ${data.action || "[행동 입력]"}
 Result: ${data.result || "[결과 입력]"}`;
 
-  const promptDraft = `아래 정보를 바탕으로 자기소개서 초안을 작성해줘.
-조건: 과장 없이, 구체적인 행동과 결과 중심으로 작성하고, 추상적인 표현은 줄여줘.
-
-전공: ${data.major || "[전공 입력]"}
-닉네임: ${data.nickname || "[닉네임 입력]"}
-지원 직무: ${data.jobTitle || "[지원 직무 입력]"}
-기업명: ${data.companyName || "[기업명 입력]"}
-문항: ${data.question || "[자기소개서 문항 입력]"}
-채용공고/JD: ${data.jdText || "[채용공고 입력]"}
-경험 제목: ${data.experienceTitle || "[경험 제목 입력]"}
-Situation: ${data.situation || "[상황 입력]"}
-Task: ${data.task || "[과제 입력]"}
-Action: ${data.action || "[행동 입력]"}
-Result: ${data.result || "[결과 입력]"}
-강조 역량: ${data.competencies || "[역량 입력]"}`;
+  const promptDraft = buildDraftPrompt(data);
 
   const promptFeedback = `다음 자기소개서 초안을 인사담당자 관점에서 평가해줘.
 1) 논리성
@@ -494,6 +395,7 @@ Result: ${data.result || "[결과 입력]"}
 
   const promptRewrite = `다음 자기소개서 수정본을 참고해서, 사실관계를 바꾸지 말고 더 자연스럽고 내 언어처럼 보이게 다듬어줘.
 금지: 없는 경험 추가, 과장, 추상적 미사여구.
+${lengthInstruction(data)}
 
 지원 직무: ${data.jobTitle || "[지원 직무 입력]"}
 문항: ${data.question || "[문항 입력]"}
@@ -532,6 +434,14 @@ Result: ${data.result || "[결과 입력]"}
           onChangeParticipation={() => setShowWelcomeModal(true)}
         />
 
+        <section className="question-switcher" aria-label="작성 문항 선택">
+          <label htmlFor="active-workbook-question">작성 중인 문항</label>
+          <select id="active-workbook-question" value={data.activeQuestionId} onChange={event => setData(prev => selectQuestion(prev, event.target.value))}>
+            {data.questions.map((item, index) => <option key={item.id} value={item.id}>문항 {index + 1}: {item.question.trim().replace(/\s+/g, " ").slice(0, 60) || "문항을 입력해주세요"}</option>)}
+          </select>
+          <button type="button" style={styles.secondaryButton} onClick={() => setCurrentStep(0)}>문항 관리</button>
+          <p>현재 문항 {activeQuestionIndex + 1} / 총 {data.questions.length}개 · 경험, STAR, 초안과 최종본은 문항별로 저장됩니다. 진행률은 선택한 문항 기준입니다.</p>
+        </section>
         <div style={styles.stepRow}>
           {steps.map((step, index) => (
             <StepChip
@@ -540,7 +450,7 @@ Result: ${data.result || "[결과 입력]"}
               icon={step.icon}
               index={index}
               active={currentStep === index}
-              done={index < completedCount}
+              done={completedSteps[index]}
               onClick={() => setCurrentStep(index)}
             />
           ))}
@@ -550,8 +460,8 @@ Result: ${data.result || "[결과 입력]"}
           <div style={styles.leftColumn}>
             {currentStep === 0 && (
               <SectionCard
-                title="1단계. 기본 정보 입력"
-                description="전공, 닉네임, 지원 직무와 문항을 먼저 정리하면 이후 AI 결과의 품질이 좋아집니다."
+                title="1단계. 지원정보·문항 설정"
+                description="지원기업·직무·JD를 정리하고, 자기소개서 문항마다 제한 글자수를 설정하세요."
                 tip="먼저 직무와 문항을 분명하게 써두면 프롬프트 정확도가 높아집니다."
                 icon="🎯"
               >
@@ -580,14 +490,6 @@ Result: ${data.result || "[결과 입력]"}
                   placeholder="예: 삼성전자, 네이버, CJ제일제당"
                 />
                 <Field
-                  label="자기소개서 문항"
-                  value={data.question}
-                  onChange={(value) => updateField("question", value)}
-                  placeholder="예: 지원 직무를 위해 준비한 경험과 강점을 작성하시오."
-                  textarea
-                  rows={4}
-                />
-                <Field
                   label="채용공고 / JD"
                   value={data.jdText}
                   onChange={(value) => updateField("jdText", value)}
@@ -595,21 +497,72 @@ Result: ${data.result || "[결과 입력]"}
                   textarea
                   rows={10}
                 />
+                <section className="question-list" aria-label="자기소개서 문항 관리">
+                  <h3>자기소개서 문항</h3>
+                  <p>문항을 하나씩 추가하세요. 작성할 문항을 선택하면 2~7단계에서 해당 문항의 내용을 이어서 작성할 수 있습니다. 제한 글자수와 공백 계산 기준은 문항마다 따로 설정합니다. 지원 직무·기업명·채용공고는 모든 문항에 공통으로 적용됩니다.</p>
+                  {data.questions.map((item, index) => <article key={item.id} className="question-card" aria-label={`자기소개서 문항 ${index + 1}`}>
+                    <div className="question-card-actions">
+                      <strong>문항 {index + 1}{item.id === data.activeQuestionId ? " · 작성 중" : ""}</strong>
+                      <button type="button" style={styles.secondaryButton} aria-pressed={item.id === data.activeQuestionId} onClick={() => setData(prev => selectQuestion(prev, item.id))}>문항 {index + 1} 작성</button>
+                      <button type="button" style={styles.secondaryButton} disabled={data.questions.length <= 1} onClick={() => deleteWorkbookQuestion(item.id, index)}>문항 {index + 1} 삭제</button>
+                    </div>
+                    <Field label={`자기소개서 문항 ${index + 1}`} value={item.question} onChange={value => setData(prev => editQuestion(prev, item.id, value))} placeholder="예: 지원 직무를 위해 준비한 경험과 강점을 작성하시오." textarea rows={4} />
+                    <div className="question-length-settings">
+                      <div>
+                        <label htmlFor={`question-limit-${item.id}`} style={styles.label}>문항 {index + 1} 제한 글자수</label>
+                        <input id={`question-limit-${item.id}`} type="text" inputMode="numeric" pattern="[0-9]*" value={item.charLimit} onChange={event => setData(prev => updateQuestion(prev, item.id, { charLimit: event.target.value.replace(/\D/g, "") }))} placeholder="예: 500" style={styles.input} />
+                      </div>
+                      <div>
+                        <label htmlFor={`question-count-mode-${item.id}`} style={styles.label}>문항 {index + 1} 글자수 계산 기준</label>
+                        <select id={`question-count-mode-${item.id}`} value={item.charCountMode} onChange={event => setData(prev => updateQuestion(prev, item.id, { charCountMode: event.target.value }))} style={styles.input}>
+                          <option value="includeSpaces">공백 포함</option>
+                          <option value="excludeSpaces">공백 제외</option>
+                        </select>
+                      </div>
+                    </div>
+                    <p>제출처의 제한을 양의 정수로 입력하세요. 비워두면 미설정으로 유지됩니다. 공백 포함은 줄바꿈을 1자로 세고, 공백 제외는 띄어쓰기와 줄바꿈을 제외합니다.</p>
+                  </article>)}
+                  <button type="button" style={styles.primaryButton} onClick={addWorkbookQuestion}>+ 문항 추가</button>
+                </section>
               </SectionCard>
             )}
 
             {currentStep === 1 && (
               <SectionCard
                 title="2단계. 면접관의 시선으로 경험 탐색"
-                description="면접관은 경험의 규모보다 그 안에서 드러나는 생각과 행동을 살펴봅니다. 아래 4대 핵심역량을 참고해 나의 경험을 자유롭게 탐색해보세요."
+                description="면접관은 경험에서 드러난 행동의 수준을 살펴봅니다. 단순히 ‘열심히 했다’는 표현을 넘어, 왜 그렇게 판단했고 어떻게 행동했는지 떠올려보세요."
                 tip="수업, 아르바이트, 동아리, 팀 프로젝트, 일상 속 작은 경험도 좋습니다. 모든 역량을 담을 필요는 없습니다."
                 icon="📌"
               >
+                <details className="interviewer-guide">
+                  <summary>면접관의 역량 평가 5단계 모델 보기</summary>
+                  <div className="interviewer-guide-content">
+                  <p>강의안의 5단계 모델로 나의 행동을 돌아보세요. 기본적인 역할 수행에서 나아가, 나의 판단과 구체적인 행동이 드러나는 경험을 탐색합니다.</p>
+                  <ol className="interviewer-level-grid">
+                    {interviewerLevels.map(({ level, title, description }) => (
+                      <li key={level} className={level === 3 || level === 4 ? "interviewer-level interviewer-level-target" : "interviewer-level"}>
+                        <span className="interviewer-level-label">Level {level}</span>
+                        <strong>{title}</strong>
+                        <p>{description}</p>
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="interviewer-level-focus">작성 포인트: 경험을 나열하기보다 ‘왜(의도·판단)’와 ‘어떻게(나의 행동·차별성)’를 적어보세요. 아래 역량별 기준은 강의안에서 강조한 Level 3~4의 행동을 보여줍니다.</p>
+                  <small>강의안 참고: 면접관의 역량 평가 5단계 모델 · 4대 핵심 역량별 평가 기준</small>
+                  </div>
+                </details>
                 <div className="experience-competency-grid" aria-label="면접관이 살펴보는 4대 핵심역량">
-                  {experienceCompetencies.map(({ title, description, question }, index) => (
+                  {experienceCompetencies.map(({ title, description, question, level3, level4 }, index) => (
                     <article className="experience-competency-card" key={title}>
                       <h3>{index + 1}) {title}</h3>
                       <p>{description}</p>
+                      <details className="experience-criteria-accordion">
+                        <summary>Level 3·4 평가 기준 보기</summary>
+                        <dl className="experience-behavior-criteria">
+                          <div><dt>Level 3 · 능동적 행동</dt><dd>{level3}</dd></div>
+                          <div><dt>Level 4 · 창조적 행동</dt><dd>{level4}</dd></div>
+                        </dl>
+                      </details>
                       <p className="experience-competency-question">돌아볼 질문: {question}</p>
                     </article>
                   ))}
@@ -631,7 +584,7 @@ Result: ${data.result || "[결과 입력]"}
                   placeholder="어떤 상황이었나요? 내가 생각하고 행동한 일, 주변의 반응, 결과와 배운 점을 자유롭게 적어보세요. 아직 정리되지 않은 메모도 괜찮습니다."
                   textarea
                   rows={8}
-                  help="분량이나 형식에 제한은 없습니다. 카드의 질문을 참고하되, 실제로 겪은 일과 나의 역할을 내 말로 적어보세요."
+                  help="분량이나 형식에 제한은 없습니다. 판단한 이유, 내가 취한 구체적인 행동, 그로 인한 변화와 결과를 실제 경험에 맞게 적어보세요."
                 />
               </SectionCard>
             )}
@@ -707,6 +660,10 @@ Result: ${data.result || "[결과 입력]"}
                 tip="처음부터 완벽할 필요는 없습니다. 먼저 구조가 살아 있는 초안을 만드는 것이 중요합니다."
                 icon="✍️"
               >
+                <div className="draft-length-option">
+                  <label><input type="checkbox" checked={data.draftOverflow} onChange={event => updateField("draftOverflow", event.target.checked)} /> 퇴고를 고려하여 제한 글자수의 120%로 초안 생성</label>
+                  <p>{data.charLimit ? `문항 ${activeQuestionIndex + 1} 제출 제한: ${data.charLimit}자 (${countModeLabel}) · 초안 목표: ${draftTarget(data)}자 이내` : "1단계에서 이 문항의 제한 글자수를 설정하세요. 미설정된 제한은 프롬프트에서 임의로 정하지 않습니다."}</p>
+                </div>
                 <PromptBox title="초안 생성 프롬프트" prompt={promptDraft} />
                 <Field
                   label="AI 초안 또는 내가 작성한 초안"
@@ -716,6 +673,7 @@ Result: ${data.result || "[결과 입력]"}
                   textarea
                   rows={14}
                 />
+                <div style={styles.counterBox}>초안 글자수 ({countModeLabel}): {draftCharCount}{data.charLimit ? ` / 목표 ${draftTarget(data)}자 이내` : " · 제한 미설정"}</div>
               </SectionCard>
             )}
 
@@ -765,8 +723,10 @@ Result: ${data.result || "[결과 입력]"}
                   textarea
                   rows={15}
                 />
-                <div style={styles.counterBox}>
-                  현재 글자 수(공백 제외): {finalCharCount}
+                <div role="status" style={{ ...styles.counterBox, color: data.charLimit && finalCharCount > Number(data.charLimit) ? "#b42318" : COLORS.text }}>
+                  최종본 글자수 ({countModeLabel}): {finalCharCount}{data.charLimit ? ` / 제한 ${data.charLimit}자 · ${finalCharCount > Number(data.charLimit) ? `${finalCharCount - Number(data.charLimit)}자 초과 — 직접 줄여주세요.` : `${Number(data.charLimit) - finalCharCount}자 남음`}` : " · 제한 미설정 — 1단계에서 설정하세요."}
+                  <div>공백 포함 {characterCount(data.finalDraft)}자 / 공백 제외 {characterCount(data.finalDraft, "excludeSpaces")}자</div>
+                  {data.draftOverflow && <div>120% 옵션은 초안에만 적용합니다. 최종본은 실제 제출 제한에 맞추세요.</div>}
                 </div>
                 <Field
                   label="최종 점검 메모"
@@ -824,7 +784,7 @@ Result: ${data.result || "[결과 입력]"}
               </p>
               <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
                 <ProgressItem
-                  label="기본 정보"
+                  label="지원정보·문항 설정"
                   done={Boolean(
                     data.major &&
                       data.nickname &&
@@ -1011,12 +971,14 @@ function Field({
   rows = 4,
   help,
 }) {
+  const fieldId = useId();
   return (
     <div>
-      <label style={styles.label}>{label}</label>
+      <label htmlFor={fieldId} style={styles.label}>{label}</label>
       {help ? <div style={styles.helpText}>{help}</div> : null}
       {textarea ? (
         <textarea
+          id={fieldId}
           rows={rows}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -1025,6 +987,7 @@ function Field({
         />
       ) : (
         <input
+          id={fieldId}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
@@ -1572,6 +1535,39 @@ const globalCss = `
     box-shadow: 0 0 0 4px rgba(155,124,246,0.12);
   }
   .workbook-main-grid > div { min-width: 0; }
+  .question-switcher { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px; margin-top: 18px; border: 1px solid #e7ddf7; border-radius: 18px; background: rgba(255,255,255,.85); }
+  .question-switcher label { font-weight: 700; }
+  .question-switcher select { min-width: 0; flex: 1 1 240px; max-width: 100%; padding: 12px; border: 1px solid #e7ddf7; border-radius: 12px; background: #fff; font: inherit; }
+  .question-switcher p { width: 100%; margin: 0; font-size: 13px; line-height: 1.7; color: #6d6875; }
+  .question-list { display: grid; gap: 14px; }
+  .question-list h3, .question-list p { margin: 0; }
+  .question-list p { font-size: 14px; line-height: 1.7; color: #6d6875; }
+  .question-card { min-width: 0; padding: 16px; border: 1px solid #e7ddf7; border-radius: 16px; background: #f8f5ff; }
+  .question-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .question-card-actions strong { flex: 1 1 120px; }
+  .question-length-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0 10px; }
+  .question-length-settings > div { min-width: 0; }
+  .draft-length-option { border: 1px solid #e7ddf7; border-radius: 14px; padding: 14px; background: #f8f5ff; }
+  .draft-length-option label { display: flex; align-items: flex-start; gap: 8px; line-height: 1.6; font-weight: 700; }
+  .draft-length-option input { flex-shrink: 0; margin-top: 5px; }
+  .draft-length-option p { margin: 8px 0 0; font-size: 13px; line-height: 1.7; }
+  @media (max-width: 600px) { .question-length-settings { grid-template-columns: minmax(0, 1fr); } }
+  .question-card button:disabled { opacity: .5; cursor: not-allowed; }
+  .interviewer-guide { border-radius: 18px; border: 1px solid #e7ddf7; background: #f8f5ff; }
+  .interviewer-guide-content { padding: 0 18px 18px; }
+  .interviewer-guide > summary, .experience-criteria-accordion > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; cursor: pointer; list-style: none; font-weight: 700; font-size: 14px; color: #5541b9; border-radius: 18px; }
+  .interviewer-guide > summary::-webkit-details-marker, .experience-criteria-accordion > summary::-webkit-details-marker { display: none; }
+  .interviewer-guide > summary::after, .experience-criteria-accordion > summary::after { content: "+"; font-size: 20px; flex-shrink: 0; }
+  .interviewer-guide[open] > summary::after, .experience-criteria-accordion[open] > summary::after { content: "−"; }
+  .interviewer-guide > summary:focus-visible, .experience-criteria-accordion > summary:focus-visible { outline: 3px solid #8b7cf6; outline-offset: 3px; }
+  .interviewer-guide p { margin: 0; font-size: 14px; line-height: 1.7; }
+  .interviewer-guide small { display: block; margin-top: 12px; color: #6d6875; line-height: 1.6; }
+  .interviewer-level-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 16px 0; padding: 0; list-style: none; }
+  .interviewer-level { min-width: 0; padding: 12px; border: 1px solid #e7ddf7; border-radius: 12px; background: #fff; overflow-wrap: anywhere; }
+  .interviewer-level-label { display: block; margin-bottom: 6px; color: #6d6875; font-size: 12px; font-weight: 700; }
+  .interviewer-level strong { display: block; margin-bottom: 6px; font-size: 14px; }
+  .interviewer-level-target { border-color: #9e8cf3; background: #efe7ff; }
+  .interviewer-guide .interviewer-level-focus { padding: 12px; border-radius: 12px; background: #fff; color: #5541b9; }
   .experience-competency-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1588,10 +1584,17 @@ const globalCss = `
   .experience-competency-card h3 { margin: 0 0 10px; font-size: 16px; color: #6f5ce7; }
   .experience-competency-card p { margin: 0; font-size: 14px; line-height: 1.7; }
   .experience-competency-card .experience-competency-question { margin-top: 12px; color: #6d6875; }
+  .experience-criteria-accordion { margin-top: 14px; }
+  .experience-criteria-accordion > summary { padding: 10px 12px; border: 1px solid #e7ddf7; border-radius: 10px; background: #f8f5ff; }
+  .experience-behavior-criteria { display: grid; gap: 8px; margin: 14px 0 0; font-size: 13px; line-height: 1.7; }
+  .experience-behavior-criteria > div { padding: 10px; border-radius: 10px; background: #f8f5ff; }
+  .experience-behavior-criteria > div:last-child { background: #fff8eb; }
+  .experience-behavior-criteria dt { font-weight: 700; color: #5541b9; }
+  .experience-behavior-criteria dd { margin: 4px 0 0; }
   .experience-writing-guide { margin: 0; font-size: 14px; line-height: 1.7; color: #6d6875; }
   .workbook-section { min-width: 0; overflow-wrap: anywhere; }
   @media (max-width: 600px) {
-    .experience-competency-grid { grid-template-columns: minmax(0, 1fr); }
+    .experience-competency-grid, .interviewer-level-grid { grid-template-columns: minmax(0, 1fr); }
     .workbook-section { padding: 18px !important; }
   }
   @media (max-width: 920px) {

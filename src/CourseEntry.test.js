@@ -32,6 +32,33 @@ test('existing experience data survives step navigation and edits', async () => 
   expect(container.querySelector('.workbook-section textarea').value).toBe('자유 작성\n두 번째 줄');
   expect(JSON.parse(localStorage.getItem('ai_self_intro_full_app_v1')).experienceSummary).toBe('자유 작성\n두 번째 줄');
 });
+
+test('multiple questions retain their own experience and drafts across selection and reload', async () => {
+  localStorage.setItem('ai_self_intro_full_app_v1', JSON.stringify({ major: '전공', nickname: '학생', courseId: 'general', question: '첫 문항', experienceTitle: '첫 제목', experienceSummary: '첫 경험', draft: '첫 초안' }));
+  await render(<App />);
+  expect(container.querySelector('[aria-label="자기소개서 문항 1"] textarea').value).toBe('첫 문항');
+  await click('+ 문항 추가');
+  change(container.querySelector('[aria-label="자기소개서 문항 2"] textarea'), '둘째 문항');
+  await click('2단계');
+  expect(container.querySelector('.workbook-section input').value).toBe('');
+  change(container.querySelector('.workbook-section input'), '둘째 제목'); change(container.querySelector('.workbook-section textarea'), '둘째 경험');
+  await click('5단계'); change(container.querySelector('.workbook-section textarea'), '둘째 초안');
+  const stored = JSON.parse(localStorage.getItem('ai_self_intro_full_app_v1'));
+  change(container.querySelector('#active-workbook-question'), stored.questions[0].id);
+  expect(container.querySelector('.workbook-section textarea').value).toBe('첫 초안');
+  expect(container.querySelector('.workbook-section pre').textContent).toContain('문항: 첫 문항');
+  await click('2단계'); expect(container.querySelector('.workbook-section textarea').value).toBe('첫 경험');
+  await act(async () => { root.unmount(); root = createRoot(container); root.render(<App />); });
+  change(container.querySelector('#active-workbook-question'), stored.questions[1].id);
+  await click('5단계'); expect(container.querySelector('.workbook-section textarea').value).toBe('둘째 초안');
+  expect(container.querySelector('.workbook-section pre').textContent).toContain('문항: 둘째 문항');
+  await click('문항 관리');
+  const confirm = jest.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+  await click('문항 2 삭제'); expect(container.querySelectorAll('.question-card')).toHaveLength(2);
+  await click('문항 2 삭제'); expect(container.querySelectorAll('.question-card')).toHaveLength(1);
+  expect(container.querySelector('[aria-label="자기소개서 문항 1"] textarea').value).toBe('첫 문항');
+  confirm.mockRestore();
+});
 test('general admission requires no code and enters offline transparently', async () => {
   service.joinCourse.mockRejectedValue(new Error('서버 미연결'));
   const entered = jest.fn();
@@ -124,4 +151,35 @@ test('owner can delete only stopped instructors after confirmation', async () =>
   await click('삭제'); expect(service.deleteInstructor).toHaveBeenCalledWith('stopped@example.edu');
   expect(container.textContent).not.toContain('stopped@example.edu'); expect(container.textContent).toContain('active@example.edu');
   confirm.mockRestore();
+});
+
+test('per-question limits update draft prompts and final counts without clipping content', async () => {
+  localStorage.setItem('ai_self_intro_full_app_v1', JSON.stringify({ major: '전공', nickname: '학생', courseId: 'general', question: '첫 문항', finalDraft: '가 나 다' }));
+  await render(<App />);
+  const firstCard = container.querySelector('.question-card');
+  change(firstCard.querySelector('input[inputmode="numeric"]'), '4');
+  await click('+ 문항 추가');
+  change(container.querySelectorAll('.question-card')[1].querySelector('input[inputmode="numeric"]'), '10');
+  await click('5단계');
+  expect(container.querySelector('.workbook-section pre').textContent).toContain('초안도 10자 이내');
+  expect(container.querySelector('.draft-length-option input').checked).toBe(false);
+  await act(async () => container.querySelector('.draft-length-option input').click());
+  expect(container.querySelector('.workbook-section pre').textContent).toContain('120%인 12자');
+  let saved = JSON.parse(localStorage.getItem('ai_self_intro_full_app_v1'));
+  change(container.querySelector('#active-workbook-question'), saved.questions[0].id);
+  expect(container.querySelector('.draft-length-option input').checked).toBe(false);
+  expect(container.querySelector('.workbook-section pre').textContent).toContain('초안도 4자 이내');
+  await click('7단계');
+  expect(container.querySelector('.workbook-section [role=status]').textContent).toContain('1자 초과');
+  expect(container.querySelector('.workbook-section textarea').value).toBe('가 나 다');
+  await click('문항 관리');
+  change(container.querySelector('.question-card select'), 'excludeSpaces');
+  await click('7단계');
+  expect(container.querySelector('.workbook-section [role=status]').textContent).toContain('1자 남음');
+  await act(async () => { root.unmount(); root = createRoot(container); root.render(<App />); });
+  expect(container.querySelector('.question-card select').value).toBe('excludeSpaces');
+  saved = JSON.parse(localStorage.getItem('ai_self_intro_full_app_v1'));
+  change(container.querySelector('#active-workbook-question'), saved.questions[1].id);
+  await click('5단계');
+  expect(container.querySelector('.workbook-section pre').textContent).toContain('120%인 12자');
 });
