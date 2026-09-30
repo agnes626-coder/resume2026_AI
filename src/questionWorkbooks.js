@@ -1,7 +1,9 @@
+import { normalizeExperiences, updateCompatibilityExperience, experienceExportSections, savedExperienceSections } from "./experienceWorkbooks";
+
 export const questionFields = [
   'question', 'experienceTitle', 'experienceSummary', 'situation', 'task',
   'action', 'result', 'competencies', 'draft', 'aiFeedback', 'revisedDraft',
-  'finalDraft', 'reflection', 'charLimit', 'charCountMode', 'draftOverflow',
+  'finalDraft', 'reflection', 'charLimit', 'charCountMode', 'draftOverflow', 'selectedExperienceId',
 ];
 const newId = () => globalThis.crypto?.randomUUID?.() || `question-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 export const normalizeCharLimit = value => {
@@ -31,10 +33,11 @@ export function normalizeWorkbook(saved = {}) {
   }) : [];
   if (!questions.length) questions = [{ ...blankQuestion(), ...fieldsFrom(saved) }];
   const active = questions.find(item => item.id === saved.activeQuestionId) || questions[0];
-  return { ...saved, questions, activeQuestionId: active.id, ...fieldsFrom(active) };
+  return normalizeExperiences({ ...saved, questions, activeQuestionId: active.id, ...fieldsFrom(active) });
 }
 
 export function updateWorkbookField(data, key, value) {
+  if (['experienceTitle', 'experienceSummary'].includes(key)) return updateCompatibilityExperience(data, key, value);
   if (!questionFields.includes(key)) return { ...data, [key]: value };
   return updateQuestion(data, data.activeQuestionId, { [key]: value });
 }
@@ -73,7 +76,7 @@ export function workbookSections(data) {
     { title: '사용자 정보', fields: [['전공', data.major], ['닉네임', data.nickname], ['참가 교과목', data.courseName]] },
     { title: '공통 지원 정보', fields: [['지원 직무', data.jobTitle], ['기업명', data.companyName], ['채용공고/JD', data.jdText]] },
   ];
-  return [...common, ...data.questions.flatMap((item, index) => [
+  return [...common, ...experienceExportSections(data), ...data.questions.flatMap((item, index) => [
     { title: `문항 ${index + 1}`, fields: [['자기소개서 문항', item.question], ['제한 글자수', item.charLimit ? `${item.charLimit}자` : '미설정'], ['글자수 계산 기준', item.charCountMode === 'excludeSpaces' ? '공백 제외' : '공백 포함'], ['퇴고용 120% 초안', item.draftOverflow ? '사용' : '사용 안 함']] },
     { title: `문항 ${index + 1} · 면접관의 시선으로 경험 탐색`, fields: [['경험 제목', item.experienceTitle], ['경험 요약', item.experienceSummary]] },
     { title: `문항 ${index + 1} · STAR`, fields: [['Situation', item.situation], ['Task', item.task], ['Action', item.action], ['Result', item.result]] },
@@ -81,6 +84,7 @@ export function workbookSections(data) {
     { title: `문항 ${index + 1} · 초안`, fields: [['초안', item.draft]] },
     { title: `문항 ${index + 1} · AI 첨삭`, fields: [['AI 피드백', item.aiFeedback], ['수정본', item.revisedDraft]] },
     { title: `문항 ${index + 1} · 최종본`, fields: [['최종본', item.finalDraft], ['점검 메모', item.reflection]] },
+    ...savedExperienceSections(data, item, index),
   ])];
 }
 

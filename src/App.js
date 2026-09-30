@@ -5,6 +5,9 @@ import { Document, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
 import { normalizeWorkbook, updateWorkbookField, updateQuestion, editQuestion, selectQuestion, addQuestion, removeQuestion, workbookSections, workbookText, characterCount, draftTarget, lengthInstruction } from "./questionWorkbooks";
 
+import { addExperience, updateExperience, selectExperience, archiveExperience, restoreExperience } from "./experienceWorkbooks";
+import { ExperienceExplorer, ExperienceSelection } from "./ExperienceExplorer";
+
 import { buildDraftPrompt } from "./workbookPrompts";
 
 const STORAGE_KEY = "ai_self_intro_full_app_v1";
@@ -195,7 +198,7 @@ export default function App() {
   const addWorkbookQuestion = () => { setData(prev => addQuestion(prev)); setCurrentStep(0); };
   const deleteWorkbookQuestion = (id, index) => {
     if (data.questions.length <= 1) return;
-    if (!window.confirm(`문항 ${index + 1}과 이 문항의 경험·초안·최종본을 삭제할까요? 삭제한 내용은 복구할 수 없습니다.`)) return;
+    if (!window.confirm(`문항 ${index + 1}과 이 문항의 STAR·초안·최종본을 삭제할까요? 공통 경험 목록은 유지됩니다. 삭제한 문항은 복구할 수 없습니다.`)) return;
     setData(prev => removeQuestion(prev, id));
   };
   const activeQuestionIndex = data.questions.findIndex(item => item.id === data.activeQuestionId);
@@ -530,7 +533,7 @@ ${lengthInstruction(data)}
             {currentStep === 1 && (
               <SectionCard
                 title="2단계. 면접관의 시선으로 경험 탐색"
-                description="면접관은 경험에서 드러난 행동의 수준을 살펴봅니다. 단순히 ‘열심히 했다’는 표현을 넘어, 왜 그렇게 판단했고 어떻게 행동했는지 떠올려보세요."
+                description="면접관은 경험의 화려함보다 그 상황에서 내가 실제로 어떻게 행동했는지를 봅니다. 왜 그렇게 행동했는지(의도), 어떻게 행동했는지(차별성)를 떠올려보세요."
                 tip="수업, 아르바이트, 동아리, 팀 프로젝트, 일상 속 작은 경험도 좋습니다. 모든 역량을 담을 필요는 없습니다."
                 icon="📌"
               >
@@ -567,24 +570,15 @@ ${lengthInstruction(data)}
                     </article>
                   ))}
                 </div>
-                <p className="experience-writing-guide">
-                  떠오르는 경험을 편하게 적어보세요. 여러 경험을 메모해도 좋습니다.
-                  그중 다음 STAR 단계에서 구체화할 경험을 중심으로 제목과 내용을 정리해보세요.
-                </p>
-                <Field
-                  label="경험 제목"
-                  value={data.experienceTitle}
-                  onChange={(value) => updateField("experienceTitle", value)}
-                  placeholder="예: 고객의 불편을 개선한 아르바이트, 팀원과 갈등을 풀었던 프로젝트"
-                />
-                <Field
-                  label="나의 경험 자유롭게 작성하기"
-                  value={data.experienceSummary}
-                  onChange={(value) => updateField("experienceSummary", value)}
-                  placeholder="어떤 상황이었나요? 내가 생각하고 행동한 일, 주변의 반응, 결과와 배운 점을 자유롭게 적어보세요. 아직 정리되지 않은 메모도 괜찮습니다."
-                  textarea
-                  rows={8}
-                  help="분량이나 형식에 제한은 없습니다. 판단한 이유, 내가 취한 구체적인 행동, 그로 인한 변화와 결과를 실제 경험에 맞게 적어보세요."
+                <ExperienceExplorer
+                  data={data}
+                  onAdd={() => setData(prev => addExperience(prev))}
+                  onUpdate={(id, key, value) => setData(prev => updateExperience(prev, id, key, value))}
+                  onSelect={id => setData(prev => selectExperience(prev, id))}
+                  onArchive={id => setData(prev => archiveExperience(prev, id))}
+                  onRestore={id => setData(prev => restoreExperience(prev, id))}
+                  onContinue={() => setCurrentStep(2)}
+                  Field={Field} primaryButton={styles.primaryButton} secondaryButton={styles.secondaryButton}
                 />
               </SectionCard>
             )}
@@ -596,6 +590,7 @@ ${lengthInstruction(data)}
                 tip="특히 Action은 가장 자세하게 적어주세요. 어떤 방식으로 해결했는지가 핵심입니다."
                 icon="🧠"
               >
+                <ExperienceSelection data={data} onSelect={id => setData(prev => selectExperience(prev, id))} />
                 <Field
                   label="Situation (상황)"
                   value={data.situation}
@@ -1568,6 +1563,25 @@ const globalCss = `
   .interviewer-level strong { display: block; margin-bottom: 6px; font-size: 14px; }
   .interviewer-level-target { border-color: #9e8cf3; background: #efe7ff; }
   .interviewer-guide .interviewer-level-focus { padding: 12px; border-radius: 12px; background: #fff; color: #5541b9; }
+  .experience-explorer { display: grid; gap: 14px; min-width: 0; }
+  .experience-explorer h3, .experience-explorer h4, .experience-explorer p { margin: 0; }
+  .experience-explorer p, .experience-selection p { font-size: 14px; line-height: 1.7; color: #6d6875; }
+  .experience-selection { display: grid; gap: 10px; padding: 16px; background: #f8f5ff; border: 1px solid #e7ddf7; border-radius: 16px; min-width: 0; }
+  .experience-selection label { font-weight: 800; }
+  .experience-selection select { min-width: 0; width: 100%; padding: 12px; border: 1px solid #e7ddf7; border-radius: 12px; background: #fff; font: inherit; }
+  .experience-selection p { margin: 0; }
+  .experience-selection button:disabled { opacity: .5; cursor: not-allowed; }
+  .selected-experience-memo > summary, .archived-experiences > summary { cursor: pointer; font-weight: 700; padding: 10px 0; }
+  .selected-experience-memo p { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .experience-memo-card { display: grid; gap: 12px; padding: 16px; border: 1px solid #e7ddf7; border-radius: 16px; background: #fff; min-width: 0; }
+  .experience-memo-selected { border: 2px solid #8b7cf6; background: #fcfaff; }
+  .experience-memo-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .experience-memo-actions h4 { flex: 1 1 180px; font-size: 15px; overflow-wrap: anywhere; }
+  .archived-experiences { padding: 12px; border: 1px solid #e7ddf7; border-radius: 14px; }
+  .archived-experiences > div { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 8px 0; }
+  .archived-experiences span { overflow-wrap: anywhere; min-width: 0; }
+  .experience-empty { padding: 16px; border: 1px dashed #c8baf2; border-radius: 14px; }
+
   .experience-competency-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

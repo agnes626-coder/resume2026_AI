@@ -39,9 +39,11 @@ test('multiple questions retain their own experience and drafts across selection
   expect(container.querySelector('[aria-label="자기소개서 문항 1"] textarea').value).toBe('첫 문항');
   await click('+ 문항 추가');
   change(container.querySelector('[aria-label="자기소개서 문항 2"] textarea'), '둘째 문항');
-  await click('2단계');
-  expect(container.querySelector('.workbook-section input').value).toBe('');
-  change(container.querySelector('.workbook-section input'), '둘째 제목'); change(container.querySelector('.workbook-section textarea'), '둘째 경험');
+  await click('2단계'); await click('+ 경험 추가');
+  const secondExperience = container.querySelectorAll('.experience-memo-card')[1];
+  expect(secondExperience.querySelector('input').value).toBe('');
+  change(secondExperience.querySelector('input'), '둘째 제목'); change(secondExperience.querySelector('textarea'), '둘째 경험');
+  await click('경험 2 사용');
   await click('5단계'); change(container.querySelector('.workbook-section textarea'), '둘째 초안');
   const stored = JSON.parse(localStorage.getItem('ai_self_intro_full_app_v1'));
   change(container.querySelector('#active-workbook-question'), stored.questions[0].id);
@@ -182,4 +184,31 @@ test('per-question limits update draft prompts and final counts without clipping
   change(container.querySelector('#active-workbook-question'), saved.questions[1].id);
   await click('5단계');
   expect(container.querySelector('.workbook-section pre').textContent).toContain('120%인 12자');
+});
+
+test('experience exploration adds shared memos, switches writing, archives and restores after reload', async () => {
+  localStorage.setItem('ai_self_intro_full_app_v1', JSON.stringify({ major: '전공', nickname: '학생', courseId: 'general', question: '문항', experienceTitle: '기존 경험', experienceSummary: '기존 메모', action: '기존 행동', draft: '기존 초안' }));
+  await render(<App />); await click('2단계');
+  expect(container.querySelectorAll('.experience-competency-card')).toHaveLength(4);
+  await click('+ 경험 추가');
+  const second = container.querySelectorAll('.experience-memo-card')[1];
+  change(second.querySelector('input'), '새 경험'); change(second.querySelector('textarea'), '새 경험 메모');
+  expect(JSON.parse(localStorage.getItem('ai_self_intro_full_app_v1')).experienceTitle).toBe('기존 경험');
+  await click('경험 2 사용'); await click('선택한 경험으로 STAR 작성');
+  expect(container.querySelector('.workbook-section [role=status]').textContent).toContain('새 경험');
+  expect(container.querySelector('.workbook-section textarea').value).toBe('');
+  const action = Array.from(container.querySelectorAll('label')).find(label => label.textContent === 'Action (행동)');
+  change(container.querySelector(`#${action.htmlFor}`), '새 행동');
+  await click('5단계'); change(container.querySelector('.workbook-section textarea'), '새 초안');
+  expect(container.querySelector('.workbook-section pre').textContent).toContain('경험 요약: 새 경험 메모');
+  expect(container.querySelector('.workbook-section pre').textContent).toContain('Action: 새 행동');
+  await click('2단계'); await click('경험 1 사용'); await click('5단계');
+  expect(container.querySelector('.workbook-section textarea').value).toBe('기존 초안');
+  await click('2단계'); await click('경험 2 삭제');
+  expect(container.querySelectorAll('.experience-memo-card')).toHaveLength(1);
+  await act(async () => { root.unmount(); root = createRoot(container); root.render(<App />); });
+  await click('2단계');
+  expect(container.querySelector('.archived-experiences').textContent).toContain('새 경험');
+  await click('복원'); await click('경험 2 사용'); await click('5단계');
+  expect(container.querySelector('.workbook-section textarea').value).toBe('새 초안');
 });
