@@ -1,3 +1,4 @@
+export { buildFeedbackPrompt } from './feedbackPrompt';
 export { buildCompetencyPrompt } from './competencyPrompt';
 import { lengthInstruction } from './questionWorkbooks';
 

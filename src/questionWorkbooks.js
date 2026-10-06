@@ -1,10 +1,11 @@
+import { feedbackExportFields } from './feedbackFields';
 import { competencyExportFields } from './competencyConnections';
 import { normalizeExperiences, updateCompatibilityExperience, experienceExportSections, savedExperienceSections } from "./experienceWorkbooks";
 
 export const questionFields = [
   'question', 'experienceTitle', 'experienceSummary', 'situation', 'task',
   'action', 'result', 'competencies', 'competencyEvidence', 'jobConnection', 'draft', 'aiFeedback', 'revisedDraft',
-  'finalDraft', 'reflection', 'charLimit', 'charCountMode', 'draftOverflow', 'selectedExperienceId',
+  'finalDraft', 'reflection', 'revisionNotes', 'charLimit', 'charCountMode', 'draftOverflow', 'selectedExperienceId',
 ];
 const newId = () => globalThis.crypto?.randomUUID?.() || `question-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 export const normalizeCharLimit = value => {
@@ -83,7 +84,7 @@ export function workbookSections(data) {
     { title: `문항 ${index + 1} · STAR`, fields: [['Situation', item.situation], ['Task', item.task], ['Action', item.action], ['Result', item.result]] },
     { title: `문항 ${index + 1} · 역량 연결`, fields: competencyExportFields(item) },
     { title: `문항 ${index + 1} · 초안`, fields: [['초안', item.draft]] },
-    { title: `문항 ${index + 1} · AI 첨삭`, fields: [['AI 피드백', item.aiFeedback], ['수정본', item.revisedDraft]] },
+    { title: `문항 ${index + 1} · AI 첨삭`, fields: feedbackExportFields(item) },
     { title: `문항 ${index + 1} · 최종본`, fields: [['최종본', item.finalDraft], ['점검 메모', item.reflection]] },
     ...savedExperienceSections(data, item, index),
   ])];

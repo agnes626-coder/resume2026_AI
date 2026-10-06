@@ -1,6 +1,7 @@
+import { feedbackExportFields } from './feedbackFields';
 import { competencyExportFields } from './competencyConnections';
 const newId = () => globalThis.crypto?.randomUUID?.() || `experience-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-export const experienceWritingFields = ['situation', 'task', 'action', 'result', 'competencies', 'competencyEvidence', 'jobConnection', 'draft', 'aiFeedback', 'revisedDraft', 'finalDraft', 'reflection'];
+export const experienceWritingFields = ['situation', 'task', 'action', 'result', 'competencies', 'competencyEvidence', 'jobConnection', 'draft', 'aiFeedback', 'revisedDraft', 'finalDraft', 'reflection', 'revisionNotes'];
 const writingFrom = source => Object.fromEntries(experienceWritingFields.map(key => [key, typeof source?.[key] === 'string' ? source[key] : '']));
 const memoFrom = source => ({ experienceTitle: typeof source?.experienceTitle === 'string' ? source.experienceTitle : '', experienceSummary: typeof source?.experienceSummary === 'string' ? source.experienceSummary : '' });
 const hasContent = source => Object.values({ ...memoFrom(source), ...writingFrom(source) }).some(value => value.trim());
@@ -78,6 +79,6 @@ export function experienceExportSections(data) {
 export function savedExperienceSections(data, question, questionIndex) {
   return Object.entries(cacheFrom(question.experienceDrafts)).filter(([id, writing]) => id !== selectionKey(question.selectedExperienceId) && Object.values(writing).some(value => value.trim())).map(([id, writing]) => {
     const experience = data.experiences.find(item => item.id === id);
-    return { title: `문항 ${questionIndex + 1} · 보관 작성본 (${experience?.experienceTitle || '경험 미선택'})`, fields: [['Situation', writing.situation], ['Task', writing.task], ['Action', writing.action], ['Result', writing.result], ...competencyExportFields(writing), ['초안', writing.draft], ['AI 피드백', writing.aiFeedback], ['수정본', writing.revisedDraft], ['최종본', writing.finalDraft], ['점검 메모', writing.reflection]] };
+    return { title: `문항 ${questionIndex + 1} · 보관 작성본 (${experience?.experienceTitle || '경험 미선택'})`, fields: [['Situation', writing.situation], ['Task', writing.task], ['Action', writing.action], ['Result', writing.result], ...competencyExportFields(writing), ['초안', writing.draft], ...feedbackExportFields(writing), ['최종본', writing.finalDraft], ['점검 메모', writing.reflection]] };
   });
 }

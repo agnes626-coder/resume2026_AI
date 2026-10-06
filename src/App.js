@@ -13,7 +13,10 @@ import { StarStructure } from "./StarStructure";
 import { CompetencyConnection } from "./CompetencyConnection";
 import { competencyConnectionComplete } from "./competencyConnections";
 
-import { buildDraftPrompt, buildCompetencyPrompt } from "./workbookPrompts";
+import { AIFeedback } from "./AIFeedback";
+import { feedbackComplete } from "./feedbackFields";
+
+import { buildDraftPrompt, buildCompetencyPrompt, buildFeedbackPrompt } from "./workbookPrompts";
 
 const STORAGE_KEY = "ai_self_intro_full_app_v1";
 const STUDENT_LIST_KEY = "ai_self_intro_student_list_v1";
@@ -89,6 +92,7 @@ const defaultData = {
   draft: "",
   aiFeedback: "",
   revisedDraft: "",
+  revisionNotes: "",
   finalDraft: "",
   reflection: "",
   courseId: "",
@@ -363,7 +367,7 @@ export default function App() {
       Boolean(data.situation && data.task && data.action && data.result),
       competencyConnectionComplete(data),
       Boolean(data.draft),
-      Boolean(data.aiFeedback && data.revisedDraft),
+      feedbackComplete(data),
       Boolean(data.finalDraft),
     ];
   }, [data]);
@@ -378,18 +382,7 @@ export default function App() {
 
   const promptDraft = buildDraftPrompt(data);
 
-  const promptFeedback = `다음 자기소개서 초안을 인사담당자 관점에서 평가해줘.
-1) 논리성
-2) 구체성
-3) 직무 적합성
-4) 클리셰 표현
-의 4가지 기준으로 피드백하고, 마지막에 수정 방향을 제안해줘.
-
-지원 직무: ${data.jobTitle || "[지원 직무 입력]"}
-기업명: ${data.companyName || "[기업명 입력]"}
-문항: ${data.question || "[문항 입력]"}
-채용공고/JD: ${data.jdText || "[채용공고 입력]"}
-초안: ${data.draft || "[초안 입력]"}`;
+  const promptFeedback = buildFeedbackPrompt(data);
 
   const promptRewrite = `다음 자기소개서 수정본을 참고해서, 사실관계를 바꾸지 말고 더 자연스럽고 내 언어처럼 보이게 다듬어줘.
 금지: 없는 경험 추가, 과장, 추상적 미사여구.
@@ -397,7 +390,9 @@ ${lengthInstruction(data)}
 
 지원 직무: ${data.jobTitle || "[지원 직무 입력]"}
 문항: ${data.question || "[문항 입력]"}
-수정본: ${data.revisedDraft || "[수정본 입력]"}`;
+수정본: ${data.revisedDraft || "[수정본 입력]"}
+학생의 피드백 검토·수정 계획: ${data.revisionNotes || "[검토 메모 없음]"}
+학생이 선택한 수정 방향과 사실을 보존하고, 제외하기로 한 제안을 다시 추가하지 마세요.`;
 
   return (
     <div style={appStyle}>
@@ -622,29 +617,8 @@ ${lengthInstruction(data)}
             )}
 
             {currentStep === 5 && (
-              <SectionCard
-                title="6단계. AI 첨삭"
-                description="초안을 평가받고, 수정 방향을 반영한 새 버전을 남겨보세요."
-                tip="AI 결과를 그대로 쓰지 말고, 어떤 점이 좋아졌는지 먼저 판단한 뒤 반영하세요."
-                icon="🤖"
-              >
-                <PromptBox title="AI 피드백 프롬프트" prompt={promptFeedback} />
-                <Field
-                  label="AI 피드백"
-                  value={data.aiFeedback}
-                  onChange={(value) => updateField("aiFeedback", value)}
-                  placeholder="논리성, 구체성, 직무 적합성, 클리셰 표현에 대한 피드백을 붙여 넣으세요."
-                  textarea
-                  rows={12}
-                />
-                <Field
-                  label="피드백 반영 수정본"
-                  value={data.revisedDraft}
-                  onChange={(value) => updateField("revisedDraft", value)}
-                  placeholder="AI 피드백을 바탕으로 수정한 버전을 적으세요."
-                  textarea
-                  rows={12}
-                />
+              <SectionCard title="6단계. AI 첨삭" description="AI의 평가·질문을 받은 뒤, 사실을 확인하고 내 언어로 직접 수정하세요." tip="AI는 근거와 수정 방향을 제안하고, 어떤 피드백을 반영할지는 학생이 판단합니다." icon="🤖">
+                <AIFeedback data={data} onChange={updateField} onDraft={() => setCurrentStep(4)} Field={Field} PromptBox={PromptBox} prompt={promptFeedback} secondaryButton={styles.secondaryButton} />
               </SectionCard>
             )}
 
@@ -753,7 +727,7 @@ ${lengthInstruction(data)}
                 <ProgressItem label="초안 작성" done={Boolean(data.draft)} />
                 <ProgressItem
                   label="AI 첨삭"
-                  done={Boolean(data.aiFeedback && data.revisedDraft)}
+                  done={feedbackComplete(data)}
                 />
                 <ProgressItem label="최종본" done={Boolean(data.finalDraft)} />
               </div>
@@ -1542,6 +1516,23 @@ const globalCss = `
   .star-action-target { position: absolute; top: -3px; bottom: -3px; left: 60%; width: 3px; background: #9e145b; border-radius: 2px; }
   @media (max-width: 600px) { .star-context-grid { grid-template-columns: minmax(0, 1fr); } .star-action-card { padding: 16px; } .star-action-heading h3 { font-size: 18px; } }
 
+  .ai-feedback-workbook { display: grid; gap: 16px; min-width: 0; }
+  .ai-feedback-workbook p { margin: 0; font-size: 14px; line-height: 1.8; color: #6d6875; }
+  .feedback-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding-left: 24px; font-size: 14px; line-height: 1.7; }
+  .feedback-card { display: grid; gap: 14px; min-width: 0; padding: 16px; border: 1px solid #e7ddf7; border-radius: 16px; background: #fcfaff; }
+  .feedback-card h3 { margin: 0; font-size: 17px; color: #6b55c7; }
+  .feedback-criteria { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .feedback-criteria > div { min-width: 0; padding: 12px; background: #f1eaff; border-radius: 12px; font-size: 14px; }
+  .feedback-reference { min-width: 0; padding: 12px 16px; background: #f8f5ff; border: 1px solid #e7ddf7; border-radius: 14px; }
+  .feedback-reference summary { cursor: pointer; font-weight: 700; line-height: 1.7; }
+  .feedback-reference dl { display: grid; gap: 12px; }
+  .feedback-reference dt { font-weight: 700; }
+  .feedback-reference dd { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.8; }
+  .feedback-prompt[open] > div { margin-top: 12px; }
+  .feedback-empty { display: grid; gap: 12px; }
+  .feedback-student-revision { border: 2px solid #b9acf9; }
+  .ai-feedback-workbook .feedback-length-over { color: #b42318; font-weight: 700; }
+  @media (max-width: 700px) { .feedback-flow, .feedback-criteria { grid-template-columns: minmax(0, 1fr); } }
   .competency-connection { display: grid; gap: 16px; min-width: 0; }
   .competency-connection p { margin: 0; font-size: 14px; line-height: 1.8; color: #6d6875; }
   .competency-connection-card { display: grid; gap: 12px; min-width: 0; padding: 16px; border: 1px solid #e7ddf7; border-radius: 16px; background: #fcfaff; }
