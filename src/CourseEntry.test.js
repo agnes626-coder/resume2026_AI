@@ -213,6 +213,29 @@ test('per-question limits update draft prompts and final counts without clipping
   expect(container.querySelector('.workbook-section pre').textContent).toContain('120%인 12자');
 });
 
+test('question example accordion toggles and fills the active question only after confirming overwrite', async () => {
+  localStorage.setItem('ai_self_intro_full_app_v1', JSON.stringify({ major: '전공', nickname: '학생', courseId: 'general', question: '', charLimit: '300' }));
+  await render(<App />);
+  expect(container.querySelectorAll('.question-examples-toggle')).toHaveLength(1);
+  const toggle = container.querySelector('.question-examples-toggle');
+  const panel = document.getElementById(toggle.getAttribute('aria-controls'));
+  expect(toggle.getAttribute('aria-expanded')).toBe('false'); expect(panel.hidden).toBe(true);
+  await act(async () => toggle.click());
+  expect(toggle.getAttribute('aria-expanded')).toBe('true'); expect(panel.hidden).toBe(false);
+  expect(panel.querySelectorAll('.question-example')).toHaveLength(7);
+  const useButtons = () => panel.querySelectorAll('.question-example-use');
+  await act(async () => useButtons()[0].click());
+  const textarea = container.querySelector('.question-card textarea');
+  expect(textarea.value).toContain('지원한 이유');
+  expect(container.querySelector('.question-card input[inputmode="numeric"]').value).toBe('300');
+  const confirm = jest.spyOn(window, 'confirm').mockReturnValueOnce(false);
+  await act(async () => useButtons()[1].click());
+  expect(confirm).toHaveBeenCalled(); expect(textarea.value).toContain('지원한 이유');
+  await act(async () => toggle.click());
+  expect(toggle.getAttribute('aria-expanded')).toBe('false'); expect(panel.hidden).toBe(true);
+  confirm.mockRestore();
+});
+
 test('experience exploration adds shared memos, switches writing, archives and restores after reload', async () => {
   localStorage.setItem('ai_self_intro_full_app_v1', JSON.stringify({ major: '전공', nickname: '학생', courseId: 'general', question: '문항', experienceTitle: '기존 경험', experienceSummary: '기존 메모', action: '기존 행동', draft: '기존 초안' }));
   await render(<App />); await click('2단계');

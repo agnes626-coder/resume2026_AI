@@ -9,6 +9,7 @@ import { addExperience, updateExperience, selectExperience, archiveExperience, r
 import { ExperienceExplorer, ExperienceSelection } from "./ExperienceExplorer";
 
 import { StarStructure } from "./StarStructure";
+import { QuestionExamples } from "./QuestionExamples";
 
 import { CompetencyConnection } from "./CompetencyConnection";
 import { competencyConnectionComplete } from "./competencyConnections";
@@ -214,6 +215,13 @@ export default function App() {
     setData(prev => removeQuestion(prev, id));
   };
   const activeQuestionIndex = data.questions.findIndex(item => item.id === data.activeQuestionId);
+  const applyQuestionExample = example => {
+    const active = data.questions[activeQuestionIndex];
+    if (!active) return;
+    const current = active.question.trim();
+    if (current && current !== example.question && !window.confirm(`문항 ${activeQuestionIndex + 1}에 이미 입력한 내용이 있습니다. 예시 문항으로 바꿀까요?`)) return;
+    setData(prev => updateQuestion(prev, active.id, { question: example.question, ...(active.charLimit ? {} : { charLimit: example.charLimit }) }));
+  };
 
   const registerStudentLocal = (major, nickname, courseId, courseName) => {
     const nextStudent = {
@@ -493,6 +501,7 @@ ${lengthInstruction(data)}
                 <section className="question-list" aria-label="자기소개서 문항 관리">
                   <h3>자기소개서 문항</h3>
                   <p>문항을 하나씩 추가하세요. 작성할 문항을 선택하면 2~7단계에서 해당 문항의 내용을 이어서 작성할 수 있습니다. 제한 글자수와 공백 계산 기준은 문항마다 따로 설정합니다. 지원 직무·기업명·채용공고는 모든 문항에 공통으로 적용됩니다.</p>
+                  <QuestionExamples activeIndex={activeQuestionIndex} onUse={applyQuestionExample} />
                   {data.questions.map((item, index) => <article key={item.id} className="question-card" aria-label={`자기소개서 문항 ${index + 1}`}>
                     <div className="question-card-actions">
                       <strong>문항 {index + 1}{item.id === data.activeQuestionId ? " · 작성 중" : ""}</strong>
@@ -1471,6 +1480,20 @@ const globalCss = `
   .draft-length-option p { margin: 8px 0 0; font-size: 13px; line-height: 1.7; }
   @media (max-width: 600px) { .question-length-settings { grid-template-columns: minmax(0, 1fr); } }
   .question-card button:disabled { opacity: .5; cursor: not-allowed; }
+  .question-examples { min-width: 0; border: 1px solid #e7ddf7; border-radius: 16px; background: #f8f5ff; }
+  .question-examples-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border: 0; border-radius: 16px; background: transparent; color: #5541b9; font: inherit; font-size: 14px; font-weight: 700; text-align: left; cursor: pointer; }
+  .question-examples-toggle small { font-weight: 400; color: #6d6875; }
+  .question-examples-toggle:focus-visible, .question-example-use:focus-visible { outline: 3px solid #8b7cf6; outline-offset: 2px; }
+  .question-example-icon { flex-shrink: 0; font-size: 20px; line-height: 1; color: #5541b9; }
+  .question-examples-panel { padding: 0 18px 18px; }
+  .question-examples-panel > p { margin: 0 0 12px; }
+  .question-examples-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+  .question-example { min-width: 0; padding: 14px; border: 1px solid #e7ddf7; border-radius: 12px; background: #fff; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+  .question-example h4 { margin: 0 0 8px; font-size: 15px; color: #5541b9; }
+  .question-example blockquote { margin: 0 0 10px; padding: 10px 12px; border-left: 4px solid #9e8cf3; border-radius: 8px; background: #f8f5ff; }
+  .question-example-limit { color: #6d6875; font-size: 13px; white-space: nowrap; }
+  .question-example ul { margin: 6px 0 12px; padding-left: 20px; list-style: disc; }
+  .question-example-use { max-width: 100%; padding: 10px 14px; border: 1px solid #9e8cf3; border-radius: 10px; background: #efe7ff; color: #5541b9; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; white-space: normal; }
   .interviewer-guide { border-radius: 18px; border: 1px solid #e7ddf7; background: #f8f5ff; }
   .interviewer-guide-content { padding: 0 18px 18px; }
   .interviewer-guide > summary, .experience-criteria-accordion > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; cursor: pointer; list-style: none; font-weight: 700; font-size: 14px; color: #5541b9; border-radius: 18px; }
